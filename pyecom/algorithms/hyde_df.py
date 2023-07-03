@@ -8,12 +8,13 @@ import numpy as np
 
 class HydeDF(MetaheuristicBase):
 
-    def __init__(self, n_iter: int, n_iter_tolerance: int,
+    def __init__(self, n_iter: int, iter_tolerance: int, epsilon_tolerance: float,
                  pop_size: int, pop_dim: int,
                  lower_bound: np.ndarray, upper_bound: np.ndarray,
                  f_weight: float, f_cr: float):
         super().__init__(n_iter=n_iter,
-                         n_iter_tolerance=n_iter_tolerance,
+                         iter_tolerance=iter_tolerance,
+                         epsilon_tolerance=epsilon_tolerance,
                          pop_size=pop_size,
                          pop_dim=pop_dim)
 
@@ -206,14 +207,19 @@ class HydeDF(MetaheuristicBase):
             # Update best member
             self.current_best_idx = np.argmin(self.population_fitness)
 
-            if self.population_fitness[self.current_best_idx] < self.current_best_fitness:
+            if abs(np.sum([-self.current_best_fitness,
+                           self.population[self.current_best_idx]])) < self.epsilon_tolerance:
                 self.current_best = self.population[self.current_best_idx, :]
                 self.current_best_fitness = self.population_fitness[self.current_best_idx]
                 self.current_tolerance = 0
             else:
                 self.current_tolerance += 1
 
-            if self.current_tolerance >= self.n_iter_tolerance:
+            # Save best parameters
+            self.f_weight_old[self.current_best_idx, :] = self.f_weight[self.current_best_idx, :]
+            self.f_cr_old[self.current_best_idx] = self.f_cr[self.current_best_idx]
+
+            if self.current_tolerance >= self.iter_tolerance:
                 break
 
         return
