@@ -44,8 +44,8 @@ class HMParser(BaseParser):
         return
 
     def parse(self):
-        #self.read_general_info()
-        #self.read_branch_data()
+        # self.read_general_info()
+        # self.read_branch_data()
         self.read_generator_data()
         self.read_load_data()
         self.read_storage_data()
@@ -56,7 +56,7 @@ class HMParser(BaseParser):
         return
 
     @staticmethod
-    def get_timeseries(values, component: str, keep_string: bool = False):
+    def get_timeseries(values, component: str):
 
         temp_data_idx = np.where(values == component)
         temp_data = values.iloc[temp_data_idx[0]].copy(deep=True).to_numpy()
@@ -154,24 +154,43 @@ class HMParser(BaseParser):
     def read_storage_data(self):
         # Read the Excel
         sheet_name_stor = 'Storage_EC{}'.format(self.ec_id)
-        data_storage = pd.read_excel(self.file_path, sheet_name=sheet_name_stor, header=None)
+        data_storage = pd.read_excel(self.file_path,
+                                     sheet_name=sheet_name_stor,
+                                     header=None)
 
-        storage = {'p_charge_limit': self.get_timeseries(data_storage, 'P Charge Limit (kW)'),
-                   'p_discharge_limit': self.get_timeseries(data_storage, 'P Discharge Limit (kW)'),
-                   'charge_price': self.get_timeseries(data_storage, 'Charge price (m.u)'),
-                   'discharge_price': self.get_timeseries(data_storage, 'Discharge price (m.u.)'),
-                   'internal_bus_location': self.get_characteristic(data_storage, 'Internal Bus Location'),
-                   'battery_type': self.get_characteristic(data_storage, 'Battery Type', keep_string=True),
-                   'owner': self.get_characteristic(data_storage, 'Owner'),
-                   'manager': self.get_characteristic(data_storage, 'Manager'),
-                   'type_contract': self.get_characteristic(data_storage, 'Type of Contract'),
-                   'energy_capacity': self.get_characteristic(data_storage, 'Energy Capacity (kVAh)'),
-                   'energy_min_percentage': self.get_characteristic(data_storage, 'Energy Min (%)'),
-                   'charge_efficiency': self.get_characteristic(data_storage, 'Charge Efficiency (%)'),
-                   'discharge_efficiency': self.get_characteristic(data_storage, 'Discharge Efficiency (%)'),
-                   'initial_state': self.get_characteristic(data_storage, 'Initial State (%)'),
-                   'p_charge_max': self.get_characteristic(data_storage, 'P Charge Max (kW)'),
-                   'p_discharge_max': self.get_characteristic(data_storage, 'P Discharge Max (kW)')}
+        storage = {'p_charge_limit': self.get_timeseries(data_storage,
+                                                         'P Charge Limit (kW)'),
+                   'p_discharge_limit': self.get_timeseries(data_storage,
+                                                            'P Discharge Limit (kW)'),
+                   'charge_price': self.get_timeseries(data_storage,
+                                                       'Charge price (m.u)'),
+                   'discharge_price': self.get_timeseries(data_storage,
+                                                          'Discharge price (m.u.)'),
+                   'internal_bus_location': self.get_characteristic(data_storage,
+                                                                    'Internal Bus Location'),
+                   'battery_type': self.get_characteristic(data_storage,
+                                                           'Battery Type',
+                                                           keep_string=True),
+                   'owner': self.get_characteristic(data_storage,
+                                                    'Owner'),
+                   'manager': self.get_characteristic(data_storage,
+                                                      'Manager'),
+                   'type_contract': self.get_characteristic(data_storage,
+                                                            'Type of Contract'),
+                   'energy_capacity': self.get_characteristic(data_storage,
+                                                              'Energy Capacity (kVAh)'),
+                   'energy_min_percentage': self.get_characteristic(data_storage,
+                                                                    'Energy Min (%)'),
+                   'charge_efficiency': self.get_characteristic(data_storage,
+                                                                'Charge Efficiency (%)'),
+                   'discharge_efficiency': self.get_characteristic(data_storage,
+                                                                   'Discharge Efficiency (%)'),
+                   'initial_state': self.get_characteristic(data_storage,
+                                                            'Initial State (%)'),
+                   'p_charge_max': self.get_characteristic(data_storage,
+                                                           'P Charge Max (kW)'),
+                   'p_discharge_max': self.get_characteristic(data_storage,
+                                                              'P Discharge Max (kW)')}
 
         self.storage = storage
         return
@@ -179,24 +198,36 @@ class HMParser(BaseParser):
     def read_charging_station_data(self):
         # Read the Excel
         sheet_name_charging_station = 'CStation_EC{}'.format(self.ec_id)
-        data_charging_station = pd.read_excel(self.file_path, sheet_name=sheet_name_charging_station, header=None)
+        data_charging_station = pd.read_excel(self.file_path,
+                                              sheet_name=sheet_name_charging_station,
+                                              header=None)
 
-        charging_station = {'p_charge_limit': self.get_timeseries(data_charging_station, 'P Charge Limit (kW)'),
-                            'p_discharge_limit': self.get_timeseries(data_charging_station, 'P Discharge Limit (kW)'),
+        charging_station = {'p_charge_limit': self.get_timeseries(data_charging_station,
+                                                                  'P Charge Limit (kW)'),
+                            'p_discharge_limit': self.get_timeseries(data_charging_station,
+                                                                     'P Discharge Limit (kW)'),
                             'internal_bus_location': self.get_characteristic(data_charging_station,
                                                                              'Internal Bus Location'),
-                            'owner': self.get_characteristic(data_charging_station, 'Owner'),
-                            'manager': self.get_characteristic(data_charging_station, 'Manager'),
-                            'type_contract': self.get_characteristic(data_charging_station, 'Type of Contract'),
-                            'p_charge_max': self.get_characteristic(data_charging_station, 'P Charge Max (kW)'),
-                            'p_discharge_max': self.get_characteristic(data_charging_station, 'P Discharge Max (kW)'),
+                            'owner': self.get_characteristic(data_charging_station,
+                                                             'Owner'),
+                            'manager': self.get_characteristic(data_charging_station,
+                                                               'Manager'),
+                            'type_contract': self.get_characteristic(data_charging_station,
+                                                                     'Type of Contract'),
+                            'p_charge_max': self.get_characteristic(data_charging_station,
+                                                                    'P Charge Max (kW)'),
+                            'p_discharge_max': self.get_characteristic(data_charging_station,
+                                                                       'P Discharge Max (kW)'),
                             'charge_efficiency': self.get_characteristic(data_charging_station,
                                                                          'Charge Efficiency (%)'),
                             'discharge_efficiency': self.get_characteristic(data_charging_station,
                                                                             'Discharge Efficiency (%)'),
-                            'e_capacity_max': self.get_characteristic(data_charging_station, 'E Capacity Max (kWh)'),
-                            'place_start': self.get_characteristic(data_charging_station, 'Place Start'),
-                            'place_end': self.get_characteristic(data_charging_station, 'Place End')}
+                            'e_capacity_max': self.get_characteristic(data_charging_station,
+                                                                      'E Capacity Max (kWh)'),
+                            'place_start': self.get_characteristic(data_charging_station,
+                                                                   'Place Start'),
+                            'place_end': self.get_characteristic(data_charging_station,
+                                                                 'Place End')}
 
         self.charging_station = charging_station
         return
@@ -206,14 +237,22 @@ class HMParser(BaseParser):
         sheet_name_peers = 'Peers_Info_EC{}'.format(self.ec_id)
         data_peers = pd.read_excel(self.file_path, sheet_name=sheet_name_peers, header=None)
 
-        peers = {'p_forecast': self.get_timeseries(data_peers, 'P Forecast (kW)'),
-                 'buy_price': self.get_timeseries(data_peers, 'Buy Price (m.u.)'),
-                 'sell_price': self.get_timeseries(data_peers, 'Sell Price (m.u.)'),
-                 'import_contracted_p_max': self.get_timeseries(data_peers, 'Import Contracted P Max (p.u)'),
-                 'export_contracted_p_max': self.get_timeseries(data_peers, 'Export Contracted P Max'),
-                 'type_peer': self.get_characteristic(data_peers, 'Type of Peer', keep_string=True),
-                 'type_contract': self.get_characteristic(data_peers, 'Type of Contract'),
-                 'owner_id': self.get_characteristic(data_peers, 'Owner ID')}
+        peers = {'p_forecast': self.get_timeseries(data_peers,
+                                                   'P Forecast (kW)'),
+                 'buy_price': self.get_timeseries(data_peers,
+                                                  'Buy Price (m.u.)'),
+                 'sell_price': self.get_timeseries(data_peers,
+                                                   'Sell Price (m.u.)'),
+                 'import_contracted_p_max': self.get_timeseries(data_peers,
+                                                                'Import Contracted P Max (p.u)'),
+                 'export_contracted_p_max': self.get_timeseries(data_peers,
+                                                                'Export Contracted P Max'),
+                 'type_peer': self.get_characteristic(data_peers,
+                                                      'Type of Peer', keep_string=True),
+                 'type_contract': self.get_characteristic(data_peers,
+                                                          'Type of Contract'),
+                 'owner_id': self.get_characteristic(data_peers,
+                                                     'Owner ID')}
 
         self.peers = peers
         return
@@ -223,27 +262,48 @@ class HMParser(BaseParser):
         sheet_name_v2g = 'Vehicle_EC{}'.format(self.ec_id)
         data_v2g = pd.read_excel(self.file_path, sheet_name=sheet_name_v2g, header=None)
 
-        vehicle = {'arrive_time_period': self.get_events(data_v2g, 'Arrive time period'),
-                   'departure_time_period': self.get_events(data_v2g, 'Departure time period'),
-                   'place': self.get_events(data_v2g, 'Place'),
-                   'used_soc_percentage_arriving': self.get_events(data_v2g, 'Used SOC (%) Arriving'),
-                   'soc_percentage_arriving': self.get_events(data_v2g, 'SOC (%) Arriving'),
-                   'soc_required_exit': self.get_events(data_v2g, 'SOC Required (%) Exit'),
-                   'p_charge_max_contracted': self.get_events(data_v2g, 'Pcharge Max contracted [kW]'),
-                   'p_discharge_max_contracted': self.get_events(data_v2g, 'PDcharge Max contracted [kW]'),
-                   'charge_price': self.get_events(data_v2g, 'Charge Price'),
-                   'discharge_price': self.get_events(data_v2g, 'Disharge Price'),
-                   'type_vehicle': self.get_characteristic(data_v2g, 'Type of Vehicle', keep_string=True),
-                   'owner': self.get_characteristic(data_v2g, 'Owner'),
-                   'manager': self.get_characteristic(data_v2g, 'Manager'),
-                   'type_contract': self.get_characteristic(data_v2g, 'Type of Contract'),
-                   'e_capacity_max': self.get_characteristic(data_v2g, 'E Capacity Max (kWh)'),
-                   'p_charge_max': self.get_characteristic(data_v2g, 'P Charge Max (kW)'),
-                   'p_discharge_max': self.get_characteristic(data_v2g, 'P Discharge Max (kW)'),
-                   'charge_efficiency_percentage': self.get_characteristic(data_v2g, 'Charge Efficiency (%)'),
-                   'discharge_efficiency_percentage': self.get_characteristic(data_v2g, 'Discharge Efficiency (%)'),
-                   'initial_soc_percentage': self.get_characteristic(data_v2g, 'Initial State SOC (%)'),
-                   'min_technical_soc': self.get_characteristic(data_v2g, 'Minimun Technical SOC (%)')}
+        vehicle = {'arrive_time_period': self.get_events(data_v2g,
+                                                         'Arrive time period'),
+                   'departure_time_period': self.get_events(data_v2g,
+                                                            'Departure time period'),
+                   'place': self.get_events(data_v2g,
+                                            'Place'),
+                   'used_soc_percentage_arriving': self.get_events(data_v2g,
+                                                                   'Used SOC (%) Arriving'),
+                   'soc_percentage_arriving': self.get_events(data_v2g,
+                                                              'SOC (%) Arriving'),
+                   'soc_required_exit': self.get_events(data_v2g,
+                                                        'SOC Required (%) Exit'),
+                   'p_charge_max_contracted': self.get_events(data_v2g,
+                                                              'Pcharge Max contracted [kW]'),
+                   'p_discharge_max_contracted': self.get_events(data_v2g,
+                                                                 'PDcharge Max contracted [kW]'),
+                   'charge_price': self.get_events(data_v2g,
+                                                   'Charge Price'),
+                   'discharge_price': self.get_events(data_v2g,
+                                                      'Disharge Price'),
+                   'type_vehicle': self.get_characteristic(data_v2g,
+                                                           'Type of Vehicle', keep_string=True),
+                   'owner': self.get_characteristic(data_v2g,
+                                                    'Owner'),
+                   'manager': self.get_characteristic(data_v2g,
+                                                      'Manager'),
+                   'type_contract': self.get_characteristic(data_v2g,
+                                                            'Type of Contract'),
+                   'e_capacity_max': self.get_characteristic(data_v2g,
+                                                             'E Capacity Max (kWh)'),
+                   'p_charge_max': self.get_characteristic(data_v2g,
+                                                           'P Charge Max (kW)'),
+                   'p_discharge_max': self.get_characteristic(data_v2g,
+                                                              'P Discharge Max (kW)'),
+                   'charge_efficiency_percentage': self.get_characteristic(data_v2g,
+                                                                           'Charge Efficiency (%)'),
+                   'discharge_efficiency_percentage': self.get_characteristic(data_v2g,
+                                                                              'Discharge Efficiency (%)'),
+                   'initial_soc_percentage': self.get_characteristic(data_v2g,
+                                                                     'Initial State SOC (%)'),
+                   'min_technical_soc': self.get_characteristic(data_v2g,
+                                                                'Minimun Technical SOC (%)')}
 
         self.vehicle = vehicle
         return

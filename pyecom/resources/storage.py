@@ -1,15 +1,15 @@
 # Extends the BaseResource class to provide a storage resource
 
-from pyecom.resources.base_resource import BaseResource
 import numpy as np
+from pyecom.resources.base_resource import BaseResource
 
 
 class Storage(BaseResource):
     def __init__(self,
                  name: str,
                  value: np.array,
-                 lb: np.array,
-                 ub: np.array,
+                 lower_bound: np.array,
+                 upper_bound: np.array,
                  cost: np.array,
                  max_capacity: np.array,
                  initial_charge: np.array,
@@ -18,7 +18,7 @@ class Storage(BaseResource):
                  discharge_efficiency: np.array,
                  capital_cost: np.array,
                  ):
-        super().__init__(name, value, lb, ub, cost)
+        super().__init__(name, value, lower_bound, upper_bound, cost)
 
         self.max_capacity = max_capacity
         self.initial_charge = initial_charge

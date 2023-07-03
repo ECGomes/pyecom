@@ -8,14 +8,17 @@ import numpy as np
 
 class HydeDF(MetaheuristicBase):
 
-    def __init__(self, n_iter: int, pop_size: int, pop_dim: int,
-                 lb: np.ndarray, ub: np.ndarray, f_weight: float, f_cr: float):
+    def __init__(self, n_iter: int, n_iter_tolerance: int,
+                 pop_size: int, pop_dim: int,
+                 lower_bound: np.ndarray, upper_bound: np.ndarray,
+                 f_weight: float, f_cr: float):
         super().__init__(n_iter=n_iter,
+                         n_iter_tolerance=n_iter_tolerance,
                          pop_size=pop_size,
                          pop_dim=pop_dim)
 
-        self.lb = lb
-        self.ub = ub
+        self.lower_bound = lower_bound
+        self.upper_bound = upper_bound
 
         # HyDE-DF adaptive parameters
         self.f_weight = self.f_weight_old = np.tile(f_weight, (self.pop_size, 3))
@@ -26,12 +29,18 @@ class HydeDF(MetaheuristicBase):
 
         # Placeholder values for population and population history
         self.population = None
+        self.population_fitness = None
+
         self.population_old = None
+        self.population_old_fitness = None
+
         self.population_history = None
+        self.population_history_fitness = None
 
         # Placeholder values for best population member and it's index
         self.current_best = None
         self.current_best_idx = None
+        self.current_best_fitness = None
 
         # Linear decrease placeholder value
         self.linear_decrease: float = 1.0
@@ -39,13 +48,16 @@ class HydeDF(MetaheuristicBase):
         # Current iteration value
         self.current_iteration: int = 0
 
+        # Iteration tolerance
+        self.current_tolerance: int = 0
+
     def _generate_population(self):
         """
         Method to generate an initial population
         :return: Generated initial population
         """
-        return np.random.uniform(low=self.lb, high=self.ub, size=(self.pop_size,
-                                                                  self.pop_dim))
+        return np.random.uniform(low=self.lower_bound, high=self.upper_bound, size=(self.pop_size,
+                                                                                    self.pop_dim))
 
     def _update(self):
         """
@@ -55,7 +67,7 @@ class HydeDF(MetaheuristicBase):
         :param ub: Population upper bound
         :return: Clipped population
         """
-        return np.clip(self.population, self.lb, self.ub)
+        return np.clip(self.population, self.lower_bound, self.upper_bound)
 
     def _initial_check(self):
 
@@ -71,15 +83,20 @@ class HydeDF(MetaheuristicBase):
             self.n_iter = 200
             print('Negative iterations encountered. Set value to 200\n')
 
+        # Set the current number of iterations and tolerance to 0
+        self.current_iteration = 0
+        self.iteration_tolerance = 0
+
+        # Set the linear decrease value
+        self.linear_decrease = self._calculate_linear_decrease()
+
     def _calculate_linear_decrease(self) -> float:
         return (self.n_iter - self.current_iteration) / self.n_iter
 
     def _operator(self):
         """
         Operator for the HyDE-DF crossover
-        :param population:
-        :param best_member:
-        :return:
+        :return: None
         """
 
         # Random permutations
@@ -125,67 +142,79 @@ class HydeDF(MetaheuristicBase):
         new_population = self.population_old + pop_00 * (pop_rot01 - pop_rot02) + diff_var
         new_population = self.population_old * pop_mutated + new_population * pop_mutated_inverse
 
-        return new_population, population_best_member
+        self.population = new_population
+        self.population_history = np.vstack((self.population_history, self.population))
+
+        return
 
     # Search loop
-    def _iterate(self):
+    def _update_hyde_params(self):
         """
         Method to run the search loop
         :return: None
         """
 
-        # TODO: Separate all the calculations into separate methods
-        # TODO: Objective is to have a single method with a single responsibility
+        idx01 = np.random.uniform(size=(self.pop_size, 3)) < 0.1
+        idx02 = np.random.uniform(size=(self.pop_size, 1)) < 0.1
 
-        # Generate initial population
-        self.population = self._generate_pop()
+        self.f_weight[idx01] = (0.1 + np.random.uniform(size=(self.pop_size, 3)) * 0.9)[idx01]
+        self.f_weight[~idx01] = self.f_weight_old[~idx01]
 
-        # Initial best member
-        self.current_best = self.population[0, :]
-        self.current_best_idx = 0
+        self.f_cr[idx02] = np.random.uniform(size=(self.pop_size, 1))[idx02]
+        self.f_cr[~idx02] = self.f_cr_old[~idx02]
 
-        # Initial population history
-        self.population_history = self.population
+        return
 
-        # Initial check
+    # Repair
+    def _repair(self):
+        """
+        Repair method
+        :return: None
+        """
+
+        pass
+
+    # Execute full training loop of the algorithm
+    def run(self):
+        """
+        Method to run the full training loop of the algorithm
+        :return: None
+        """
+
         self._initial_check()
+        self._generate_population()
+        self._repair()
 
-        # Iteration tolerance
-        self.iteration_tolerance = 0
+        # Set initial best member
+        self.current_best_idx = np.argmin(self.population_fitness)
+        self.current_best = self.population[self.current_best_idx, :]
+        self.current_best_fitness = self.population_fitness[self.current_best_idx]
 
         # Search loop
         for i in range(self.n_iter):
-            # Update current iteration
             self.current_iteration = i
 
             # Update HyDE-DF values
-            idx01 = np.random.uniform(size=(self.pop_size, 3)) < 0.1
-            idx02 = np.random.uniform(size=(self.pop_size, 1)) < 0.1
+            self._update_hyde_params()
 
-            self.f_weight[idx01] = (0.1 + np.random.uniform(size=(self.pop_size, 3)) * 0.9)[idx01]
-            self.f_weight[~idx01] = self.f_weight_old[~idx01]
+            # Operator
+            self._operator()
 
-            self.f_cr[idx02] = np.random.uniform(size=(self.pop_size, 1))[idx02]
-            self.f_cr[~idx02] = self.f_cr_old[~idx02]
-
-            # Update population
-            population, current_best = self._operator()
-
-            # Boundary check
-            population = self._update()
-            self.population = population
-
-            # Update population history
-            self.population_history = np.vstack((self.population_history,
-                                                 self.population))
+            # Repair
+            self._repair()
 
             # Update best member
+            self.current_best_idx = np.argmin(self.population_fitness)
 
-    # Execute full training loop of the algorithm
-    def _execute(self):
+            if self.population_fitness[self.current_best_idx] < self.current_best_fitness:
+                self.current_best = self.population[self.current_best_idx, :]
+                self.current_best_fitness = self.population_fitness[self.current_best_idx]
+                self.current_tolerance = 0
+            else:
+                self.current_tolerance += 1
 
-        # TODO: have only this method as public and call the other methods from here
-        # TODO: this will be the method that will be called from the outside and overriden by the user
-        self._initial_check()
-        self._generate_population()
-        self._iterate()
+            if self.current_tolerance >= self.n_iter_tolerance:
+                break
+
+        return
+

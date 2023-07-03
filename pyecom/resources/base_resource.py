@@ -24,13 +24,13 @@ class BaseResource:
     def __init__(self,
                  name: str,
                  value: np.array,
-                 lb: np.array,
-                 ub: np.array,
+                 lower_bound: np.array,
+                 upper_bound: np.array,
                  cost: np.array):
         self.name = name
         self.value = value
-        self.lb = lb
-        self.ub = ub
+        self.lower_bound = lower_bound
+        self.upper_bound = upper_bound
         self.cost = cost
 
     def __repr__(self):
