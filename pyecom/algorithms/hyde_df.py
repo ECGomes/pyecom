@@ -166,61 +166,65 @@ class HydeDF(MetaheuristicBase):
 
         return
 
-    # Repair
-    def _repair(self):
+    # Initialization method to call before training
+    def initialize(self):
         """
-        Repair method
-        :return: None
-        """
-
-        pass
-
-    # Execute full training loop of the algorithm
-    def run(self):
-        """
-        Method to run the full training loop of the algorithm
-        :return: None
+        Method to initialize the algorithm
+        :return:
         """
 
         self._initial_check()
         self._generate_population()
-        self._repair()
 
-        # Set initial best member
+        return
+
+    # Get the best population member
+    def get_best(self):
+        # Set best member
         self.current_best_idx = np.argmin(self.population_fitness)
         self.current_best = self.population[self.current_best_idx, :]
         self.current_best_fitness = self.population_fitness[self.current_best_idx]
 
-        # Search loop
-        for i in range(self.n_iter):
-            self.current_iteration = i
-
-            # Update HyDE-DF values
-            self._update_hyde_params()
-
-            # Operator
-            self._operator()
-
-            # Repair
-            self._repair()
-
-            # Update best member
-            self.current_best_idx = np.argmin(self.population_fitness)
-
-            if abs(np.sum([-self.current_best_fitness,
-                           self.population[self.current_best_idx]])) < self.epsilon_tolerance:
-                self.current_best = self.population[self.current_best_idx, :]
-                self.current_best_fitness = self.population_fitness[self.current_best_idx]
-                self.current_tolerance = 0
-            else:
-                self.current_tolerance += 1
-
-            # Save best parameters
-            self.f_weight_old[self.current_best_idx, :] = self.f_weight[self.current_best_idx, :]
-            self.f_cr_old[self.current_best_idx] = self.f_cr[self.current_best_idx]
-
-            if self.current_tolerance >= self.iter_tolerance:
-                break
+        # Save to history
+        self.population_history.append(self.current_best)
+        self.population_history_fitness.append(self.current_best_fitness)
 
         return
 
+    # Execute full training loop of the algorithm
+    def update_population(self):
+        """
+        Method to run an iteration of the algorithm
+        :return: None
+        """
+
+        # Update HyDE-DF values
+        self._update_hyde_params()
+
+        # Operator
+        self._operator()
+
+        return
+
+    # Post update cleanup
+    def post_update(self):
+
+        # Update best member
+        self.current_best_idx = np.argmin(self.population_fitness)
+
+        if abs(np.sum([-self.current_best_fitness,
+                       self.population[self.current_best_idx]])) < self.epsilon_tolerance:
+            self.current_best = self.population[self.current_best_idx, :]
+            self.current_best_fitness = self.population_fitness[self.current_best_idx]
+            self.current_tolerance = 0
+        else:
+            self.current_tolerance += 1
+
+        # Save best parameters
+        self.f_weight_old[self.current_best_idx, :] = self.f_weight[self.current_best_idx, :]
+        self.f_cr_old[self.current_best_idx] = self.f_cr[self.current_best_idx]
+
+        # if self.current_tolerance >= self.iter_tolerance:
+        #     break
+
+        return
