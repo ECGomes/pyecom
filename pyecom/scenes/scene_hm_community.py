@@ -1,5 +1,6 @@
 # Scenario based on Hugo Morais' community scene
 import numpy as np
+import tqdm as tqdm
 
 from pyecom.scenes import BaseScene
 from pyecom.algorithms import HydeDF
@@ -30,6 +31,9 @@ class HMCommunityScene(BaseScene):
         self.lower_bounds = None
         self.upper_bounds = None
 
+        # Reference for the algorithm instance
+        self.algo = None
+
     # Encoding process
     @staticmethod
     def encode(x: dict):
@@ -44,7 +48,7 @@ class HMCommunityScene(BaseScene):
         temp_dict = {}
 
         for name, component in zip(self.components.keys(), decoded_splits):
-            temp_dict[name] = component.reshape(self.components[name].shape)
+            temp_dict[name] = component.reshape(self.components[name].shape())
 
         return temp_dict
 
@@ -95,49 +99,71 @@ class HMCommunityScene(BaseScene):
     def run(self):
 
         # Initialize the algorithm
-        algo = HydeDF(n_iter=200, iter_tolerance=10, epsilon_tolerance=1e-6,
-                      pop_size=10, pop_dim=self.lower_bounds.shape[0],
-                      lower_bound=self.lower_bounds, upper_bound=self.upper_bounds,
-                      f_weight=0.5, f_cr=0.9)
-        algo.initialize()  # Generates the initial population
+        self.algo = HydeDF(n_iter=200, iter_tolerance=10, epsilon_tolerance=1e-6,
+                           pop_size=10, pop_dim=self.lower_bounds.shape[0],
+                           lower_bound=self.lower_bounds, upper_bound=self.upper_bounds,
+                           f_weight=0.5, f_cr=0.9)
+        self.algo.initialize()  # Generates the initial population
 
         # Evaluate the initial population
         # Requires a decoding and initial fix
+        for member_idx in np.arange(self.algo.population.shape[0]):
+            member = self.decode(self.algo.population[member_idx])
+            member = self.repair_member(member)
+            member_fitness = self.evaluate_member(member)
 
-        for i in np.arange(self.n_iter):
+            # Update the population fitness
+            self.objective_function_val.append(member_fitness)
+            self.algo.population[member_idx] = self.encode(member)
+            self.algo.population_fitness[member_idx] = member_fitness
 
-            for member_idx in algo.population.shape[0]:
-                member = self.decode(algo.population[member_idx])
+        # Update the best fitness
+        self.current_best_fitness = np.min(self.algo.population_fitness)
+        self.current_best_idx = np.argmin(self.algo.population_fitness)
+        self.current_best = self.decode(self.algo.population[self.current_best_idx])
+
+        self.algo.current_best_fitness = self.current_best_fitness
+        self.algo.current_best_idx = self.current_best_idx
+        self.algo.current_best = self.encode(self.current_best)
+
+        for i in tqdm.tqdm(np.arange(self.algo.n_iter)):
+
+            print('Iteration: {}'.format(i))
+
+            # Update algorithm iteration count
+            self.algo.current_iteration = i
+
+            # Apply the operator and adaptive parameters
+            self.algo.update_population()
+
+            # Repair the new population
+            for member_idx in np.arange(self.algo.population.shape[0]):
+                member = self.decode(self.algo.population[member_idx])
                 member = self.repair_member(member)
                 member_fitness = self.evaluate_member(member)
 
-                # Update the population fitness
+                # Update the population member and its fitness
                 self.objective_function_val.append(member_fitness)
-                algo.population_fitness[member_idx] = member_fitness
+                self.algo.population[member_idx] = self.encode(member)
+                self.algo.population_fitness[member_idx] = member_fitness
 
             # Update the best fitness
-            self.current_best_fitness = np.min(algo.population_fitness)
-            self.current_best_idx = np.argmin(algo.population_fitness)
-            self.current_best = self.decode(algo.population[self.current_best_idx])
+            self.current_best_fitness = np.min(self.algo.population_fitness)
+            self.current_best_idx = np.argmin(self.algo.population_fitness)
+            self.current_best = self.decode(self.algo.population[self.current_best_idx])
 
-            algo.current_best_fitness = self.current_best_fitness
-            algo.current_best_idx = self.current_best_idx
-            algo.current_best = self.current_best
-
-            # Update algorithm iteration count
-            algo.current_iteration = i
-
-            # Apply the operator and adaptive parameters
-            algo.update_population()
+            self.algo.current_best_fitness = self.current_best_fitness
+            self.algo.current_best_idx = self.current_best_idx
+            self.algo.current_best = self.encode(self.current_best)
 
             # Elite selection
-            algo.selection_mechanism()
+            self.algo.selection_mechanism()
 
             # Update remaining parameters and history
-            algo.post_update_cleanup()
+            self.algo.post_update_cleanup()
 
             # Check for stopping criteria
-            if algo.check_stopping_criteria():
-                break
+            #if self.algo.check_stopping_criteria():
+            #    break
 
         return

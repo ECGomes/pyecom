@@ -22,6 +22,9 @@ class HydeDF(BaseMetaheuristic):
         self.upper_bound = upper_bound
 
         # HyDE-DF adaptive parameters
+        self.initial_f_weight = self.initial_f_weight_old = f_weight
+        self.initial_f_cr = self.initial_f_cr = f_cr
+
         self.f_weight = self.f_weight_old = np.tile(f_weight, (self.pop_size, 3))
         self.f_cr = self.f_cr_old = np.tile(f_cr, (self.pop_size, 1))
 
@@ -29,14 +32,14 @@ class HydeDF(BaseMetaheuristic):
         self.fvr_rotation = np.arange(self.pop_size)
 
         # Placeholder values for population and population history
-        self.population = None
-        self.population_fitness = None
+        self.population = []
+        self.population_fitness = [0.0 for _ in np.arange(self.pop_size)]
 
-        self.population_old = None
-        self.population_old_fitness = None
+        self.population_old = []
+        self.population_old_fitness = [0.0 for _ in np.arange(self.pop_size)]
 
-        self.population_history = None
-        self.population_history_fitness = None
+        self.population_history = []
+        self.population_history_fitness = []
 
         # Placeholder values for best population member and it's index
         self.current_best = None
@@ -57,8 +60,13 @@ class HydeDF(BaseMetaheuristic):
         Method to generate an initial population
         :return: Generated initial population
         """
-        return np.random.uniform(low=self.lower_bound, high=self.upper_bound, size=(self.pop_size,
-                                                                                    self.pop_dim))
+
+        return np.random.uniform(low=np.array(self.lower_bound,
+                                              dtype=np.float64),
+                                 high=np.array(self.upper_bound,
+                                               dtype=np.float64),
+                                 size=(self.pop_size,
+                                       self.pop_dim))
 
     def _update(self):
         """
@@ -76,8 +84,8 @@ class HydeDF(BaseMetaheuristic):
             self.pop_size = 5
             print('Population size increase to minimal value of 5\n')
 
-        if (self.f_cr < 0.0) | (self.f_cr > 1.0):
-            self.f_cr = 0.5
+        if (self.initial_f_cr < 0.0) | (self.initial_f_cr > 1.0):
+            self.f_cr = np.tile(0.5, (self.pop_size, 1))
             print('Crossover rate must be between 0.0 and 1.0 (inclusive). Set to 0.5\n')
 
         if self.n_iter < 0:
@@ -134,17 +142,18 @@ class HydeDF(BaseMetaheuristic):
                                     (1, self.pop_dim)),
                             (self.f_weight.shape[0], self.pop_dim))
 
-        diff_var = (pop_01 * (population_best_member *
-                              (pop_02 +
-                               np.random.uniform(size=(self.pop_size,
-                                                       self.pop_dim) - self.population_old)))) * exp_decrease
+        diff_var = pop_02 + np.random.uniform(size=(self.pop_size, self.pop_dim)) - self.population_old
+        diff_var = diff_var * pop_01 * population_best_member * exp_decrease
+
+        # Prevent overflow
+        diff_var = np.clip(diff_var, -1e+10, 1e+10)
 
         # Population update
         new_population = self.population_old + pop_00 * (pop_rot01 - pop_rot02) + diff_var
         new_population = self.population_old * pop_mutated + new_population * pop_mutated_inverse
 
         self.population = new_population
-        self.population_history = np.vstack((self.population_history, self.population))
+        self.population_history.append(self.population)
 
         return
 
@@ -174,7 +183,19 @@ class HydeDF(BaseMetaheuristic):
         """
 
         self._initial_check()
-        self._generate_population()
+
+        # Set the placeholder variables to empty lists
+        self.population = []
+        self.population_fitness = [0.0 for _ in range(self.pop_size)]
+
+        self.population_old = []
+        self.population_old_fitness = [0.0 for _ in range(self.pop_size)]
+
+        self.population_history = []
+        self.population_history_fitness = []
+
+        # Generate the initial population
+        self.population = self.population_old = self._generate_population()
 
         return
 
@@ -222,7 +243,7 @@ class HydeDF(BaseMetaheuristic):
         # Handle the history
         self.population_old = self.population
         self.population_old_fitness = self.population_fitness
-        self.population_history = np.vstack((self.population_history, self.population))
+        self.population_history.append(self.population)
 
         # Update best member
         self.get_best()

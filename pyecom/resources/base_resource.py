@@ -84,3 +84,8 @@ class BaseResource:
     def __pow__(self, other):
         return self.value ** other.value
 
+    def ravel(self):
+        return self.value.ravel()
+
+    def shape(self):
+        return self.value.shape
