@@ -1,12 +1,12 @@
 # HyDE-DF implementation that extends the MetaheuristicsBase class
 import copy
 
-from metaheuristic_base import MetaheuristicBase
+from .base_metaheuristic import BaseMetaheuristic
 
 import numpy as np
 
 
-class HydeDF(MetaheuristicBase):
+class HydeDF(BaseMetaheuristic):
 
     def __init__(self, n_iter: int, iter_tolerance: int, epsilon_tolerance: float,
                  pop_size: int, pop_dim: int,
@@ -186,7 +186,6 @@ class HydeDF(MetaheuristicBase):
         self.current_best_fitness = self.population_fitness[self.current_best_idx]
 
         # Save to history
-        self.population_history.append(self.current_best)
         self.population_history_fitness.append(self.current_best_fitness)
 
         return
@@ -206,11 +205,38 @@ class HydeDF(MetaheuristicBase):
 
         return
 
-    # Post update cleanup
-    def post_update(self):
+    # Elitism selection
+    def selection_mechanism(self):
+
+        # Get the indexes of best members from the previous population to preserve them
+        mask = self.population_old_fitness < self.population_fitness
+
+        # Preserve the old members
+        self.population[mask, :] = self.population_old[mask, :]
+        self.population_fitness[mask] = self.population_old_fitness[mask]
+
+        return
+
+    def post_update_cleanup(self):
+
+        # Handle the history
+        self.population_old = self.population
+        self.population_old_fitness = self.population_fitness
+        self.population_history = np.vstack((self.population_history, self.population))
 
         # Update best member
-        self.current_best_idx = np.argmin(self.population_fitness)
+        self.get_best()
+
+        # Save best parameters
+        self.f_weight_old[self.current_best_idx, :] = self.f_weight[self.current_best_idx, :]
+        self.f_cr_old[self.current_best_idx] = self.f_cr[self.current_best_idx]
+
+    # Post update cleanup
+    def check_stopping_criteria(self) -> bool:
+        """
+        Method to check the stopping criteria
+        :return: True if the stopping criteria is met, False otherwise
+        """
 
         if abs(np.sum([-self.current_best_fitness,
                        self.population[self.current_best_idx]])) < self.epsilon_tolerance:
@@ -220,11 +246,7 @@ class HydeDF(MetaheuristicBase):
         else:
             self.current_tolerance += 1
 
-        # Save best parameters
-        self.f_weight_old[self.current_best_idx, :] = self.f_weight[self.current_best_idx, :]
-        self.f_cr_old[self.current_best_idx] = self.f_cr[self.current_best_idx]
+        if self.current_tolerance >= self.iter_tolerance:
+            return True
 
-        # if self.current_tolerance >= self.iter_tolerance:
-        #     break
-
-        return
+        return False
