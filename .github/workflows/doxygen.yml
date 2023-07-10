@@ -13,11 +13,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
 
-      - name: Create folder structure
-        run: |
-          mkdir docs
-          mkdir docs/html
-
       - name: Set up Doxygen
         run: sudo apt-get install -y doxygen graphviz
 
