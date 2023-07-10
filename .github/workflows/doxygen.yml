@@ -3,7 +3,7 @@ name: Generate Documentation
 on:
   push:
     branches:
-      - main  # Replace with the branch you want to trigger the workflow on
+      - main
 
 jobs:
   build:
@@ -12,6 +12,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
+
+      - name: Create folder structure
+        run: |
+          mkdir docs
+          mkdir docs/html
 
       - name: Set up Doxygen
         run: sudo apt-get install -y doxygen graphviz
@@ -22,14 +27,7 @@ jobs:
           doxygen Doxyfile
 
       - name: Deploy Documentation
-        run: |
-          mkdir docs
-          mkdir docs/html
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create Pull Request
-        run: |
-          gh pr create --title "Update Documentation" --body "Automated documentation update" --base main --head ${{ github.sha }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs/html
