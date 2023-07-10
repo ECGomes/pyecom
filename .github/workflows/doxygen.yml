@@ -22,7 +22,14 @@ jobs:
           doxygen Doxyfile
 
       - name: Deploy Documentation
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./docs/html  # Replace with the directory where your generated documentation is located
+        run: |
+          mkdir docs
+          mkdir docs/html
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Pull Request
+        run: |
+          gh pr create --title "Update Documentation" --body "Automated documentation update" --base main --head ${{ github.sha }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
