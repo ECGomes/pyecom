@@ -23,7 +23,6 @@ jobs:
 
       - name: Generate Documentation
         run: |
-          doxygen -g Doxyfile
           doxygen Doxyfile
 
       - name: Deploy Documentation
