@@ -1,17 +1,28 @@
-name: Doxygen GitHub Pages Deploy Action
+name: Generate Documentation
 
 on:
   push:
     branches:
-      - main
+      - main  # Replace with the branch you want to trigger the workflow on
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
+
     steps:
-      - run: |
-          sudo apt-get install -y doxygen
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up Doxygen
+        run: sudo apt-get install -y doxygen graphviz
+
+      - name: Generate Documentation
+        run: |
+          doxygen -g Doxyfile
           doxygen Doxyfile
-      - uses: DenverCoder1/doxygen-github-pages-action@v1.3.0
+
+      - name: Deploy Documentation
+        uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs/html  # Replace with the directory where your generated documentation is located
