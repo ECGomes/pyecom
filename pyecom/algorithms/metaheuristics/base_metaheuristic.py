@@ -1,6 +1,6 @@
 # Base class for metaheuristics
 
-class BaseMetaheuristic(object):
+class BaseMetaheuristic:
 
     def __init__(self, n_iter: int, iter_tolerance: int, epsilon_tolerance: float,
                  pop_size: int, pop_dim: int):

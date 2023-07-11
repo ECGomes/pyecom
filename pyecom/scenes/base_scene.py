@@ -1,6 +1,6 @@
 # Base scene to be extended
 
-class BaseScene(object):
+class BaseScene:
 
     def __init__(self, name: str, components: dict):
         self.name = name

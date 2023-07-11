@@ -1,6 +1,6 @@
 # Base repair class to be extended
 
-class BaseRepair(object):
+class BaseRepair:
     def __init__(self):
         pass
 
