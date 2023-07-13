@@ -2,8 +2,8 @@
 import numpy as np
 import tqdm as tqdm
 
-from pyecom.scenes import BaseScene
-from pyecom.algorithms import HydeDF
+from src.scenes import BaseScene
+from src.algorithms import HydeDF
 
 
 class HMCommunityScene(BaseScene):

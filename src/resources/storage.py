@@ -1,7 +1,7 @@
 # Extends the BaseResource class to provide a storage resource
 
 import numpy as np
-from pyecom.resources.base_resource import BaseResource
+from src.resources.base_resource import BaseResource
 
 
 class Storage(BaseResource):

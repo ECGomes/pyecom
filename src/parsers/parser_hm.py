@@ -1,7 +1,7 @@
 # Excel Parser for Hugo Morais' Excel files
 
 import pandas as pd
-from pyecom.parsers.base_parser import BaseParser
+from src.parsers.base_parser import BaseParser
 import numpy as np
 
 
