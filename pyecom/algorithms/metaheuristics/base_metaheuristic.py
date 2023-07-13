@@ -1,6 +1,9 @@
 # Base class for metaheuristics
 
-class BaseMetaheuristic:
+from ..base_algorithm import BaseAlgorithm
+
+
+class BaseMetaheuristic(BaseAlgorithm):
 
     def __init__(self, n_iter: int, iter_tolerance: int, epsilon_tolerance: float,
                  pop_size: int, pop_dim: int):
