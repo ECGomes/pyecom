@@ -2,10 +2,10 @@
 
 import numpy as np
 
-from .metrics_base import MetricsBase
+from .metrics_base import BaseMetric
 
 
-class HybridMetrics(MetricsBase):
+class HybridMetrics(BaseMetric):
 
     def __init__(self, threshold=0.1):
         self.threshold = threshold

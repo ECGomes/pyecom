@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 
 
-class MetricsBase:
+class BaseMetric:
 
     def __init__(self):
         return

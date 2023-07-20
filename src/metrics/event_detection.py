@@ -4,10 +4,10 @@ import math
 
 import numpy as np
 import sklearn.metrics
-from .metrics_base import MetricsBase
+from .metrics_base import BaseMetric
 
 
-class MetricsED(MetricsBase):
+class EDMetric(BaseMetric):
 
     def __special_metrics__(self, metrics_list):
         unique_metrics = metrics_list.copy()
