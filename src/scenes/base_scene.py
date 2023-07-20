@@ -12,5 +12,8 @@ class BaseScene:
     def evaluate(self):
         raise NotImplementedError
 
+    def repair(self):
+        raise NotImplementedError
+
     def run(self):
         raise NotImplementedError

@@ -103,7 +103,7 @@ class HMParser(BaseParser):
         sheet_name_gen = 'Generator_EC{}'.format(self.ec_id)
         data_gen = pd.read_excel(self.file_path, sheet_name=sheet_name_gen, header=None)
 
-        gen = {'p_forecast': self.get_timeseries(data_gen, 'P Forecast (kW)'),
+        gen = {'p_forecast': self.get_timeseries(data_gen, 'P Forecast (kW)') * 0.5,
                'cost_parameter_a': self.get_timeseries(data_gen, 'Cost Parameter A (m.u.)'),
                'cost_parameter_b': self.get_timeseries(data_gen, 'Cost Parameter B (m.u.)'),
                'cost_parameter_c': self.get_timeseries(data_gen, 'Cost Parameter C (m.u.)'),
@@ -121,6 +121,11 @@ class HMParser(BaseParser):
                'q_max': self.get_characteristic(data_gen, 'Q Max. (kW)'),
                'q_min': self.get_characteristic(data_gen, 'Q Min. (kW)')}
 
+        # Correct the values of the forecast according to generator type
+        for i in np.arange(gen['p_forecast'].shape[0]):
+            if gen['type_generator'][i] == 1.0:
+                gen['p_forecast'][i, :] = gen['p_max'][i]
+
         self.generator = gen
         return
 
@@ -131,8 +136,8 @@ class HMParser(BaseParser):
         data_load = pd.read_excel(self.file_path, sheet_name=sheet_name_load, header=None)
 
         # Dictionary to place the values
-        load = {'p_forecasts': self.get_timeseries(data_load, 'P Forecast (kW)'),
-                'q_forecasts': self.get_timeseries(data_load, 'Q Forecast (kVAr)'),
+        load = {'p_forecast': self.get_timeseries(data_load, 'P Forecast (kW)'),
+                'q_forecast': self.get_timeseries(data_load, 'Q Forecast (kVAr)'),
                 'p_reduce': self.get_timeseries(data_load, 'P Reduce (kW)'),
                 'p_move': self.get_timeseries(data_load, 'P Move (kW)'),
                 'p_in_move': self.get_timeseries(data_load, 'P In Move (kW)'),
@@ -180,13 +185,13 @@ class HMParser(BaseParser):
                    'energy_capacity': self.get_characteristic(data_storage,
                                                               'Energy Capacity (kVAh)'),
                    'energy_min_percentage': self.get_characteristic(data_storage,
-                                                                    'Energy Min (%)'),
+                                                                    'Energy Min (%)')/100.0,
                    'charge_efficiency': self.get_characteristic(data_storage,
-                                                                'Charge Efficiency (%)'),
+                                                                'Charge Efficiency (%)')/100.0,
                    'discharge_efficiency': self.get_characteristic(data_storage,
-                                                                   'Discharge Efficiency (%)'),
+                                                                   'Discharge Efficiency (%)')/100.0,
                    'initial_state': self.get_characteristic(data_storage,
-                                                            'Initial State (%)'),
+                                                            'Initial State (%)')/100.0,
                    'p_charge_max': self.get_characteristic(data_storage,
                                                            'P Charge Max (kW)'),
                    'p_discharge_max': self.get_characteristic(data_storage,
@@ -271,9 +276,9 @@ class HMParser(BaseParser):
                    'used_soc_percentage_arriving': self.get_events(data_v2g,
                                                                    'Used SOC (%) Arriving'),
                    'soc_percentage_arriving': self.get_events(data_v2g,
-                                                              'SOC (%) Arriving'),
+                                                              'SOC (%) Arriving')/100.0,
                    'soc_required_exit': self.get_events(data_v2g,
-                                                        'SOC Required (%) Exit'),
+                                                        'SOC Required (%) Exit')/100.0,
                    'p_charge_max_contracted': self.get_events(data_v2g,
                                                               'Pcharge Max contracted [kW]'),
                    'p_discharge_max_contracted': self.get_events(data_v2g,
@@ -296,14 +301,45 @@ class HMParser(BaseParser):
                                                            'P Charge Max (kW)'),
                    'p_discharge_max': self.get_characteristic(data_v2g,
                                                               'P Discharge Max (kW)'),
-                   'charge_efficiency_percentage': self.get_characteristic(data_v2g,
-                                                                           'Charge Efficiency (%)'),
-                   'discharge_efficiency_percentage': self.get_characteristic(data_v2g,
-                                                                              'Discharge Efficiency (%)'),
+                   'charge_efficiency': self.get_characteristic(data_v2g,
+                                                                'Charge Efficiency (%)'),
+                   'discharge_efficiency': self.get_characteristic(data_v2g,
+                                                                   'Discharge Efficiency (%)'),
                    'initial_soc_percentage': self.get_characteristic(data_v2g,
                                                                      'Initial State SOC (%)'),
                    'min_technical_soc': self.get_characteristic(data_v2g,
-                                                                'Minimun Technical SOC (%)')}
+                                                                'Minimun Technical SOC (%)')/100.0}
+
+        # Calculates the schedule for arrivals and departures
+        schedule = np.zeros((vehicle['p_charge_max'].shape[0], self.generator['p_forecast'].shape[1]))
+        schedule_charge = np.zeros((vehicle['p_charge_max'].shape[0], self.generator['p_forecast'].shape[1]))
+        schedule_discharge = np.zeros((vehicle['p_charge_max'].shape[0], self.generator['p_forecast'].shape[1]))
+        for v in range(vehicle['p_charge_max'].shape[0]):
+
+            # Check the trips
+            for t in range(2):
+                schedule[v, int(vehicle['arrive_time_period'][v, t])-1:
+                            int(vehicle['departure_time_period'][v, t])] = 1.0
+
+                current_place = int(vehicle['place'][v, t]) - 1
+
+                # get the maximum allowed charging and discharging
+                charge_max = min(vehicle['p_charge_max'][v],
+                                 self.charging_station['p_charge_max'][current_place])
+
+                discharge_max = min(vehicle['p_discharge_max'][v],
+                                    self.charging_station['p_discharge_max'][current_place])
+
+                # build the schedule
+                schedule_charge[v, int(vehicle['arrive_time_period'][v, t])-1:
+                                   int(vehicle['departure_time_period'][v, t])] = charge_max
+
+                schedule_discharge[v, int(vehicle['arrive_time_period'][v, t])-1:
+                                      int(vehicle['departure_time_period'][v, t])] = discharge_max
+
+        vehicle['schedule'] = schedule
+        vehicle['schedule_charge'] = schedule_charge
+        vehicle['schedule_discharge'] = schedule_discharge
 
         self.vehicle = vehicle
         return
