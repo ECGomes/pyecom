@@ -4,10 +4,10 @@ import math
 
 import numpy as np
 import sklearn.metrics
-from .metrics_base import BaseMetric
+from .nilm_metrics import NILMMetrics
 
 
-class EDMetric(BaseMetric):
+class EDMetric(NILMMetrics):
 
     def __special_metrics__(self, metrics_list):
         unique_metrics = metrics_list.copy()

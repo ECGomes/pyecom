@@ -3,6 +3,7 @@
 import numpy as np
 from pymoo.core.problem import Problem
 from ..parsers import HMParser
+from ..resources import BaseResource
 
 
 class PymooHMProblem(Problem):
@@ -26,10 +27,10 @@ class PymooHMProblem(Problem):
         self._initialize_values()
 
         # Set the lower and upper bounds
-        self.xl = self._initialize_xl()
-        self.xu = self._initialize_xu(data)
-        self.xl = self.encode(self.xl)
-        self.xu = self.encode(self.xu)
+        self.xl_dict = self._initialize_xl()
+        self.xu_dict = self._initialize_xu(data)
+        self.xl = self.encode(self.xl_dict)
+        self.xu = self.encode(self.xu_dict)
 
         self.storCapCost = [0.05250, 0.10500, 0.01575]
         self.v2gCapCost = [0.042, 0.063, 0.042, 0.042, 0.063]
@@ -37,7 +38,8 @@ class PymooHMProblem(Problem):
         self.objFn = 0.0
 
         # Call the super class
-        super().__init__(n_var=len(self.xl), n_obj=1, n_constr=0, xl=self.xl, xu=self.xu, vtype=float)
+        super().__init__(n_var=len(self.xl), n_obj=1, n_constr=0,
+                         xl=self.xl, xu=self.xu, vtype=float)
 
     def _initialize_values(self):
 
@@ -163,14 +165,15 @@ class PymooHMProblem(Problem):
                                  x['loadENS'][l, t] * self.components.load['cost_ens'][l, t]
                                  for t in t_range for l in load_range])
 
-        temp_stor: float = sum([self.storCapCost[s] * (x['storEnerState'][s, t] / \
+        temp_stor: float = sum([self.storCapCost[s] * (x['storEnerState'][s, t] /
                                                        self.components.storage['energy_capacity'][s] - 0.63) ** 2 + \
                                 x['storDchActPower'][s, t] * self.components.storage['discharge_price'][s, t] + \
                                 x['storChActPower'][s, t] * self.components.storage['charge_price'][s, t] + \
-                                (6.5e-3) / self.components.storage['energy_capacity'][s] * x['storChActPower'][s, t] ** 2
+                                (6.5e-3) / self.components.storage['energy_capacity'][s] * x['storChActPower'][
+                                    s, t] ** 2
                                 for t in t_range for s in stor_range])
 
-        temp_v2g: float = sum([self.v2gCapCost[v] * (x['v2gEnerState'][v, t] / \
+        temp_v2g: float = sum([self.v2gCapCost[v] * (x['v2gEnerState'][v, t] /
                                                      self.components.vehicle['e_capacity_max'][v] - 0.63) ** 2 + \
                                x['v2gDchActPower'][v, t] * self.components.vehicle['discharge_price'][v, 0] + \
                                x['v2gChActPower'][v, t] * self.components.vehicle['charge_price'][v, 0] + \
@@ -185,7 +188,7 @@ class PymooHMProblem(Problem):
 
         return
 
-    def decode(self, x):
+    def _decode(self, x):
         result_decoded = {}
         current_index = 0
 
@@ -207,10 +210,138 @@ class PymooHMProblem(Problem):
     def _evaluate(self, x, out, *args, **kwargs):
         objective_function = []
         for temp in range(x.shape[0]):
-            temp_solution = self.decode(x[temp])
+            temp_solution = self._decode(x[temp])
             self.objective_function(temp_solution)
             objective_function.append(self.objFn)
 
         print(len(objective_function))
 
         out['F'] = objective_function
+
+    def decode(self, x: np.ndarray) -> dict:
+        """
+        Decodes the solution to the resources
+        :param x: Encoded solution
+        :return: Dictionary of resources
+        """
+
+        # Decode the solution
+        decoded = self._decode(x)
+
+        # Decode the generators
+        genActPower = [BaseResource(name='genActPower_{:02d}'.format(g),
+                                    value=decoded['genActPower'][g, :],
+                                    lower_bound=self.xl_dict['genActPower'][g, :],
+                                    upper_bound=self.xu_dict['genActPower'][g, :],
+                                    cost=self.components.generator['cost_parameter_b'][g])
+                       for g in range(self.n_gen)]
+
+        genExcActPower = [BaseResource(name='genExcActPower_{:02d}'.format(g),
+                                       value=decoded['genExcActPower'][g, :],
+                                       lower_bound=self.xl_dict['genExcActPower'][g, :],
+                                       upper_bound=self.xu_dict['genExcActPower'][g, :],
+                                       cost=self.components.generator['cost_nde'][g])
+                          for g in range(self.n_gen)]
+
+        # Decode the import/export
+        pImp = BaseResource(name='pImp',
+                            value=decoded['pImp'],
+                            lower_bound=self.xl_dict['pImp'],
+                            upper_bound=self.xu_dict['pImp'],
+                            cost=self.components.peers['buy_price'][0])
+
+        pExp = BaseResource(name='pExp',
+                            value=decoded['pExp'],
+                            lower_bound=self.xl_dict['pExp'],
+                            upper_bound=self.xu_dict['pExp'],
+                            cost=self.components.peers['sell_price'][0])
+
+        # Decode the loads
+        loadRedActPower = [BaseResource(name='loadRedActPower_{:02d}'.format(l),
+                                        value=decoded['loadRedActPower'][l, :],
+                                        lower_bound=self.xl_dict['loadRedActPower'][l, :],
+                                        upper_bound=self.xu_dict['loadRedActPower'][l, :],
+                                        cost=self.components.load['cost_reduce'][l])
+                           for l in range(self.n_load)]
+
+        loadCutActPower = [BaseResource(name='loadCutActPower_{:02d}'.format(l),
+                                        value=decoded['loadCutActPower'][l, :],
+                                        lower_bound=self.xl_dict['loadCutActPower'][l, :],
+                                        upper_bound=self.xu_dict['loadCutActPower'][l, :],
+                                        cost=self.components.load['cost_cut'][l])
+                           for l in range(self.n_load)]
+
+        loadENS = [BaseResource(name='loadENS_{:02d}'.format(l),
+                                value=decoded['loadENS'][l, :],
+                                lower_bound=self.xl_dict['loadENS'][l, :],
+                                upper_bound=self.xu_dict['loadENS'][l, :],
+                                cost=self.components.load['cost_ens'][l])
+                   for l in range(self.n_load)]
+
+        loadActPower = [BaseResource(name='loadActPower_{:02d}'.format(l),
+                                     value=self.components.load['p_forecast'][l, :],
+                                     lower_bound=self.xl_dict['loadCutActPower'][l, :],
+                                     upper_bound=self.xu_dict['loadCutActPower'][l, :],
+                                     cost=self.components.load['cost_cut'][l])
+                        for l in range(self.n_load)]
+
+        # Decode the storage
+        storDchActPower = [BaseResource(name='storDchActPower_{:02d}'.format(s),
+                                        value=decoded['storDchActPower'][s, :],
+                                        lower_bound=self.xl_dict['storDchActPower'][s, :],
+                                        upper_bound=self.xu_dict['storDchActPower'][s, :],
+                                        cost=self.components.storage['discharge_price'][s])
+                           for s in range(self.n_stor)]
+
+        storChActPower = [BaseResource(name='storChActPower_{:02d}'.format(s),
+                                       value=decoded['storChActPower'][s, :],
+                                       lower_bound=self.xl_dict['storChActPower'][s, :],
+                                       upper_bound=self.xu_dict['storChActPower'][s, :],
+                                       cost=self.components.storage['charge_price'][s])
+                          for s in range(self.n_stor)]
+
+        storEnerState = [BaseResource(name='storEnerState_{:02d}'.format(s),
+                                      value=decoded['storEnerState'][s, :],
+                                      lower_bound=self.xl_dict['storEnerState'][s, :],
+                                      upper_bound=self.xu_dict['storEnerState'][s, :],
+                                      cost=np.array([0.0 for _ in range(self.n_steps)]))
+                         for s in range(self.n_stor)]
+
+        v2gDchActPower = [BaseResource(name='v2gDchActPower_{:02d}'.format(v),
+                                       value=decoded['v2gDchActPower'][v, :],
+                                       lower_bound=self.xl_dict['v2gDchActPower'][v, :],
+                                       upper_bound=self.xu_dict['v2gDchActPower'][v, :],
+                                       cost=self.components.vehicle['discharge_price'][v])
+                          for v in range(self.n_v2g)]
+
+        v2gChActPower = [BaseResource(name='v2gChActPower_{:02d}'.format(v),
+                                      value=decoded['v2gChActPower'][v, :],
+                                      lower_bound=self.xl_dict['v2gChActPower'][v, :],
+                                      upper_bound=self.xu_dict['v2gChActPower'][v, :],
+                                      cost=self.components.vehicle['charge_price'][v])
+                         for v in range(self.n_v2g)]
+
+        v2gEnerState = [BaseResource(name='v2gEnerState_{:02d}'.format(v),
+                                     value=decoded['v2gEnerState'][v, :],
+                                     lower_bound=self.xl_dict['v2gEnerState'][v, :],
+                                     upper_bound=self.xu_dict['v2gEnerState'][v, :],
+                                     cost=np.array([0.0 for _ in range(self.n_steps)]))
+                        for v in range(self.n_v2g)]
+
+        # Add everything to the dictionary
+        result = {'genActPower': genActPower,
+                  'genExcActPower': genExcActPower,
+                  'pImp': pImp,
+                  'pExp': pExp,
+                  'loadRedActPower': loadRedActPower,
+                  'loadCutActPower': loadCutActPower,
+                  'loadENS': loadENS,
+                  'loadActPower': loadActPower,
+                  'storDchActPower': storDchActPower,
+                  'storChActPower': storChActPower,
+                  'storEnerState': storEnerState,
+                  'v2gDchActPower': v2gDchActPower,
+                  'v2gChActPower': v2gChActPower,
+                  'v2gEnerState': v2gEnerState}
+
+        return result

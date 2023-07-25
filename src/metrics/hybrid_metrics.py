@@ -2,12 +2,13 @@
 
 import numpy as np
 
-from .metrics_base import BaseMetric
+from .nilm_metrics import NILMMetrics
 
 
-class HybridMetrics(BaseMetric):
+class HybridMetrics(NILMMetrics):
 
     def __init__(self, threshold=0.1):
+        super().__init__()
         self.threshold = threshold
 
     def __special_metrics__(self, metrics_list):
