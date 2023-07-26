@@ -48,15 +48,6 @@ class BaseResource:
     def __len__(self):
         return len(self.value)
 
-    def __getitem__(self, key):
-        return self.value[key]
-
-    def __setitem__(self, key, value):
-        self.value[key] = value
-
-    def __iter__(self):
-        return iter(self.value)
-
     def __contains__(self, item):
         return item in self.value
 

@@ -311,14 +311,14 @@ class PymooHMProblem(Problem):
                                        value=decoded['v2gDchActPower'][v, :],
                                        lower_bound=self.xl_dict['v2gDchActPower'][v, :],
                                        upper_bound=self.xu_dict['v2gDchActPower'][v, :],
-                                       cost=self.components.vehicle['discharge_price'][v])
+                                       cost=self.components.vehicle['discharge_price'][v, 0])
                           for v in range(self.n_v2g)]
 
         v2gChActPower = [BaseResource(name='v2gChActPower_{:02d}'.format(v),
                                       value=decoded['v2gChActPower'][v, :],
                                       lower_bound=self.xl_dict['v2gChActPower'][v, :],
                                       upper_bound=self.xu_dict['v2gChActPower'][v, :],
-                                      cost=self.components.vehicle['charge_price'][v])
+                                      cost=self.components.vehicle['charge_price'][v, 0])
                          for v in range(self.n_v2g)]
 
         v2gEnerState = [BaseResource(name='v2gEnerState_{:02d}'.format(v),

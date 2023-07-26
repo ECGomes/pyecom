@@ -14,7 +14,6 @@ class CommunityMetrics(BaseMetric):
     def __repr__(self):
         print('Community Metrics available: ')
         print('- self_consumption')
-        print('- prosumer_consumption_community')
         print('- total_produced')
         print('- total_consumed')
         print('- import_export_balance')
@@ -70,25 +69,25 @@ class CommunityMetrics(BaseMetric):
         :param consumption: List of consumption resources
         :return: Self-consumption value
         """
-        total_production = np.sum(production)
-        total_consumption = np.sum(consumption)
+        total_production = np.sum([prod.value for prod in production])
+        total_consumption = np.sum([cons.value for cons in consumption])
 
-        return total_consumption / total_production
+        return total_production / total_consumption
 
     @staticmethod
-    def cmd_prosumer_consumption_community(prosumer_consumption: BaseResource,
-                                           community_consumption: list) -> float:
+    def cmd_energy_costs(production: np.ndarray, consumption: np.ndarray) -> float:
         """
-        Calculates the consumed power of a prosumer against the total consumed by the community.
-        :param prosumer_consumption: Consumption of the prosumer
-        :param community_consumption: net consumption of the community
-        :return: Consumption of the prosumer against the total consumed by the community
+        Calculates the total cost of the community. A negative value indicates the community is spending more in
+        consumption than it is gaining by producing.
+        :param production: Production resources
+        :param consumption: Consumption resources
+        :param cost: Cost of each resource
+        :return: Total cost of the community
         """
+        production_costs = np.sum([prod.value * prod.cost for prod in production])
+        consumption_costs = np.sum([cons.value * cons.cost for cons in consumption])
 
-        prosumer = np.sum(prosumer_consumption)
-        total_consumption = np.sum(community_consumption)
-
-        return prosumer / total_consumption
+        return production_costs - consumption_costs
 
     @staticmethod
     def cmd_total_produced(production: np.ndarray) -> float:
@@ -97,7 +96,7 @@ class CommunityMetrics(BaseMetric):
         :param production: Production resources
         :return: Sum production of the community
         """
-        return np.sum(production)
+        return np.sum([prod.value for prod in production])
 
     @staticmethod
     def cmd_total_consumed(consumption: np.ndarray) -> float:
@@ -107,7 +106,7 @@ class CommunityMetrics(BaseMetric):
         :return: Sum consumption of the community
         """
 
-        return np.sum(consumption)
+        return np.sum([cons.value for cons in consumption])
 
     @staticmethod
     def cmd_import_export_balance(imports: np.ndarray, exports: np.ndarray) -> float:
@@ -119,4 +118,4 @@ class CommunityMetrics(BaseMetric):
         :return: 
         """
 
-        return np.sum(imports) - np.sum(exports)
+        return np.sum([imp.value for imp in imports]) - np.sum([exp.value for exp in exports])
