@@ -1,12 +1,8 @@
 # Imports
 
-import math
-
 import numpy as np
 
 from .metrics_base import BaseMetric
-from ..resources.base_resource import BaseResource
-from .utils import aux_get_size, aux_error_checking
 
 
 class CommunityMetrics(BaseMetric):
