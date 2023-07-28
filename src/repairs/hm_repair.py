@@ -1,11 +1,9 @@
-# Pymoo repair class for the HM problem
-
+from .base_repair import BaseRepair
+from ..parsers.parser_hm import HMParser
 import numpy as np
-from pymoo.core.repair import Repair
-from ..parsers import HMParser
 
 
-class PymooHMRepair(Repair):
+class HMRepair(BaseRepair):
 
     def __init__(self, data: HMParser):
         self.components = data
@@ -29,6 +27,11 @@ class PymooHMRepair(Repair):
         super().__init__()
 
     def _initialize_values(self):
+        """
+        Initialize the values.
+        Only necessary if values are not initialized in the algorithm.
+        :return:
+        """
 
         temp_vars = {'genActPower': np.zeros((self.n_gen, self.n_steps)),
                      'genExcActPower': np.zeros((self.n_gen, self.n_steps)),
@@ -129,8 +132,8 @@ class PymooHMRepair(Repair):
             # Prevent over charging
             secondary_mask = (x['storEnerState'][:, t - 1] + charged) > self.components.storage['energy_capacity']
             x['storChActPower'][:, t][secondary_mask] = \
-            ((self.components.storage['energy_capacity'] - x['storEnerState'][:, t - 1]) / \
-             (self.components.storage['charge_efficiency']))[secondary_mask]
+                ((self.components.storage['energy_capacity'] - x['storEnerState'][:, t - 1]) / \
+                 (self.components.storage['charge_efficiency']))[secondary_mask]
 
             # Check if discharging
             mask = x['storDchXo'][:, t] > np.zeros(x['storDchXo'][:, t].shape)
@@ -256,37 +259,28 @@ class PymooHMRepair(Repair):
 
         return
 
-    def _do(self, problem, Z, **kwargs):
-        for z in np.arange(len(Z)):
-            temp_z = self.decode(Z[z])
-            self.check_imports_exports(temp_z)
-            self.check_generators(temp_z)
-            self.check_loads(temp_z)
-            self.check_storage(temp_z)
-            self.check_v2g(temp_z)
+    def repair(self, x: dict) -> dict:
+        """
+        Repair a single element
+        :param x: Member to repair
+        :return: Repaired solution
+        """
+        # Check the imports and exports
+        self.check_imports_exports(x)
 
-            self.check_balance(temp_z)
+        # Check the generators
+        self.check_generators(x)
 
-            temp_z = self.encode(temp_z)
-            Z[z] = temp_z
+        # Check the loads
+        self.check_loads(x)
 
-        return Z
+        # Check the storage
+        self.check_storage(x)
 
-    @staticmethod
-    def encode(x):
-        result_encoded = np.concatenate([x[idx].ravel() for idx in x.keys()])
-        return result_encoded
+        # Check the EVs
+        self.check_v2g(x)
 
-    def decode(self, x):
-        result_decoded = {}
-        current_index = 0
+        # Check the balance
+        self.check_balance(x)
 
-        for idx in range(len(self.__var_names__)):
-            result_index = current_index + self.__var_idx__[idx]
-            result_decoded[self.__var_names__[idx]] = np.reshape(x[current_index:result_index],
-                                                                 self.__initial_variables__[
-                                                                     self.__var_names__[idx]].shape)
-
-            current_index = result_index
-
-        return result_decoded
+        return x

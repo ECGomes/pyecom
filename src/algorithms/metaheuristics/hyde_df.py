@@ -260,7 +260,7 @@ class HydeDF(BaseMetaheuristic):
         """
 
         if abs(np.sum([-self.current_best_fitness,
-                       self.population[self.current_best_idx]])) < self.epsilon_tolerance:
+                       self.population_fitness[self.current_best_idx]])) < self.epsilon_tolerance:
             self.current_best = self.population[self.current_best_idx, :]
             self.current_best_fitness = self.population_fitness[self.current_best_idx]
             self.current_tolerance = 0

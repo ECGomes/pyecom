@@ -5,3 +5,6 @@
 from .base_resource import BaseResource
 from .generator import Generator
 from .storage import Storage
+from .load import Load
+from .vehicle import Vehicle
+from .binary_resource import BinaryResource

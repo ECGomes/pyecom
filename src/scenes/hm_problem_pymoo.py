@@ -6,9 +6,9 @@ from ..parsers import HMParser
 from ..resources import BaseResource
 
 
-class PymooHMProblem(Problem):
+class HMProblemPymoo(Problem):
 
-    def __init__(self, data: HMParser):
+    def __init__(self, data):
 
         # Set the components
         self.components = data
