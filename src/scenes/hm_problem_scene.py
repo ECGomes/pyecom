@@ -11,7 +11,11 @@ from ..resources import BaseResource
 
 class HMProblemScene(BaseScene):
 
-    def __init__(self, name: str, data, hm_parser: HMParser):
+    def __init__(self, name: str, data, hm_parser: HMParser,
+                 n_iter=200,
+                 iter_tolerance=10,
+                 epsilon_tolerance=1e-6,
+                 pop_size=10):
 
         # Parsed data
         self.parsed_data = hm_parser
@@ -49,8 +53,15 @@ class HMProblemScene(BaseScene):
         self.lower_bounds = None
         self.upper_bounds = None
 
+        # Repair instance
+        self.hm_repair = HMRepair(self.components)
+
         # Reference for the algorithm instance
         self.algo = None
+        self.algo_n_iter = n_iter
+        self.algo_iter_tolerance = iter_tolerance
+        self.algo_epsilon_tolerance = epsilon_tolerance
+        self.algo_pop_size = pop_size
 
         # Solution placeholder
         self.solution = None
@@ -155,11 +166,8 @@ class HMProblemScene(BaseScene):
 
     def repair(self, x):
 
-        # Create a repair instance
-        repair = HMRepair(self.parsed_data)
-
         # Repair the member
-        repaired_member = repair.repair(x)
+        repaired_member = self.hm_repair.repair(x)
 
         return repaired_member
 
@@ -190,14 +198,12 @@ class HMProblemScene(BaseScene):
                 balance_penalty += 100000
 
         # Calculate the individual component costs
-        temp_gens: float = sum([x['genActPower'][g, t] * self.components['gen'].cost[g, t] +
-                                x['genExcActPower'][g, t] * self.components['gen'].cost_nde[g, t]
-                                for t in t_range for g in gen_range])
+        temp_gens = np.sum([x['genActPower'] * self.components['gen'].cost +
+                            x['genExcActPower'] * self.components['gen'].cost_nde])
 
-        temp_loads: float = sum([x['loadRedActPower'][l, t] * self.components['loads'].cost_reduce[l, t] +
-                                 x['loadCutActPower'][l, t] * self.components['loads'].cost_cut[l, t] +
-                                 x['loadENS'][l, t] * self.components['loads'].cost_ens[l, t]
-                                 for t in t_range for l in load_range])
+        temp_loads = np.sum([x['loadRedActPower'] * self.components['loads'].cost_reduce +
+                             x['loadCutActPower'] * self.components['loads'].cost_cut +
+                             x['loadENS'] * self.components['loads'].cost_ens])
 
         temp_stor: float = sum([self.components['stor'].capital_cost[s] *
                                 (x['storEnerState'][s, t] / self.components['stor'].capacity_max[s] - 0.63) ** 2 +
@@ -225,8 +231,10 @@ class HMProblemScene(BaseScene):
     def run(self):
 
         # Initialize the algorithm
-        self.algo = HydeDF(n_iter=200, iter_tolerance=10, epsilon_tolerance=1e-6,
-                           pop_size=10, pop_dim=self.lower_bounds.shape[0],
+        self.algo = HydeDF(n_iter=self.algo_n_iter, iter_tolerance=self.algo_iter_tolerance,
+                           epsilon_tolerance=self.algo_epsilon_tolerance,
+                           pop_size=self.algo_pop_size,
+                           pop_dim=self.lower_bounds.shape[0],
                            lower_bound=self.lower_bounds, upper_bound=self.upper_bounds,
                            f_weight=0.5, f_cr=0.9)
         self.algo.initialize()  # Generates the initial population

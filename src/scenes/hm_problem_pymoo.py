@@ -156,14 +156,12 @@ class HMProblemPymoo(Problem):
                 balance_penalty += 100000
 
         # Calculate the individual component costs
-        temp_gens: float = sum([x['genActPower'][g, t] * self.components.generator['cost_parameter_b'][g, t] + \
-                                x['genExcActPower'][g, t] * self.components.generator['cost_nde'][g, t]
-                                for t in t_range for g in gen_range])
+        temp_gens = np.sum(x['genActPower'] * self.components.generator['cost_parameter_b'] +
+                           x['genExcActPower'] * self.components.generator['cost_nde'])
 
-        temp_loads: float = sum([x['loadRedActPower'][l, t] * self.components.load['cost_reduce'][l, t] + \
-                                 x['loadCutActPower'][l, t] * self.components.load['cost_cut'][l, t] + \
-                                 x['loadENS'][l, t] * self.components.load['cost_ens'][l, t]
-                                 for t in t_range for l in load_range])
+        temp_loads = np.sum(x['loadRedActPower'] * self.components.load['cost_reduce'] +
+                            x['loadCutActPower'] * self.components.load['cost_cut'] +
+                            x['loadENS'] * self.components.load['cost_ens'])
 
         temp_stor: float = sum([self.storCapCost[s] * (x['storEnerState'][s, t] /
                                                        self.components.storage['energy_capacity'][s] - 0.63) ** 2 + \

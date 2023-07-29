@@ -3,4 +3,5 @@
 
 # Add the parsers package to __init__.py
 from .base_parser import BaseParser
-from .parser_hm import HMParser
+from .hm_parser import HMParser
+from .procsim_parser import PROCSIMParser

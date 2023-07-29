@@ -80,7 +80,7 @@ class HMRepairPymoo(Repair):
 
         # Type 2 (renewable)
         mask = self.components.generator['type_generator'] == 2 * np.ones(self.components.generator['type_generator'].shape)
-        x['genExcActPower'][mask] = (self.components.generator['p_forecast'] * x['genActPower'])[mask]
+        x['genExcActPower'][mask] = (self.components.generator['p_forecast'] - x['genActPower'])[mask]
         return
 
     def check_loads(self, x):

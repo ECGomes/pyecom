@@ -1,11 +1,11 @@
 from .base_repair import BaseRepair
-from ..parsers.parser_hm import HMParser
+from ..parsers.hm_parser import HMParser
 import numpy as np
 
 
 class HMRepair(BaseRepair):
 
-    def __init__(self, data: HMParser):
+    def __init__(self, data):
         self.components = data
 
         # Set the initial variables to work with
@@ -13,11 +13,11 @@ class HMRepair(BaseRepair):
         self.__var_idx__ = []
         self.__var_names__ = []
 
-        self.n_steps = data.generator['p_forecast'].shape[1]
-        self.n_gen = data.generator['p_forecast'].shape[0]
-        self.n_load = data.load['p_forecast'].shape[0]
-        self.n_stor = data.storage['p_charge_limit'].shape[0]
-        self.n_v2g = data.vehicle['p_charge_max'].shape[0]
+        self.n_steps = self.components['gen'].value.shape[1]
+        self.n_gen = self.components['gen'].value.shape[0]
+        self.n_load = self.components['loads'].value.shape[0]
+        self.n_stor = self.components['stor'].value.shape[0]
+        self.n_v2g = self.components['evs'].value.shape[0]
 
         self._initialize_values()
 
@@ -63,27 +63,36 @@ class HMRepair(BaseRepair):
 
     def check_imports_exports(self, x):
         # Clip the values
-        x['pImp'] = np.clip(x['pImp'], 0, self.components.peers['import_contracted_p_max'][0, :])
-        x['pExp'] = np.clip(x['pExp'], 0, self.components.peers['export_contracted_p_max'][0, :])
+        x['pImp'] = np.clip(x['pImp'], 0, self.components['pimp'].upper_bound)
+        x['pExp'] = np.clip(x['pExp'], 0, self.components['pexp'].upper_bound)
         return
 
     def check_generators(self, x):
         # Clip the values
         x['genActPower'] = np.clip(x['genActPower'], np.zeros(x['genActPower'].shape),
-                                   (np.ones(x['genActPower'].shape).transpose() * self.components.generator[
-                                       'p_max']).transpose())
+                                   self.components['gen'].upper_bound)
 
         # Set the excess power to 0 and fix from there
         x['genExcActPower'] = np.zeros(x['genExcActPower'].shape)
 
+        # Safeguard for 1 generator
+        if self.n_gen == 1:
+            # Check type 1 generators
+            if self.components['gen'].is_renewable == 1:
+                x['genActPower'] = self.components['gen'].upper_bound * x['genXo']
+            else:
+                x['genExcActPower'] = (self.components['gen'].upper_bound - x['genActPower'])
+
+            return
+
         # Generator types
         # Type 1 (non-renewable)
-        mask = self.components.generator['type_generator'] == np.ones(self.components.generator['type_generator'].shape)
-        x['genActPower'][mask] = (self.components.generator['p_forecast'] * x['genXo'])[mask]
+        mask = self.components['gen'].is_renewable == np.ones(self.components['gen'].is_renewable.shape)
+        x['genActPower'][mask] = (self.components['gen'].upper_bound * x['genXo'])[mask]
 
         # Type 2 (renewable)
-        mask = self.components.generator['type_generator'] == 2 * np.ones(self.components.generator['type_generator'].shape)
-        x['genExcActPower'][mask] = (self.components.generator['p_forecast'] * x['genActPower'])[mask]
+        mask = self.components['gen'].is_renewable == 2 * np.ones(self.components['gen'].is_renewable.shape)
+        x['genExcActPower'][mask] = (self.components['gen'].upper_bound - x['genActPower'])[mask]
         return
 
     def check_loads(self, x):
@@ -91,14 +100,14 @@ class HMRepair(BaseRepair):
         x['loadXo'] = (x['loadXo'] > 0.5).astype(int)
 
         # Load reduction
-        x['loadRedActPower'] = np.clip(x['loadRedActPower'], 0, self.components.load['p_reduce'])
+        x['loadRedActPower'] = np.clip(x['loadRedActPower'], 0, self.components['loads'].upper_bound)
 
         # Load curtailing
-        x['loadCutActPower'] = self.components.load['p_forecast'] * x['loadXo']
+        x['loadCutActPower'] = self.components['loads'].upper_bound * x['loadXo']
 
         # Load ENS
-        temp_vals = self.components.load['p_forecast'] - x['loadRedActPower'] - x['loadCutActPower']
-        x['loadENS'] = np.clip(temp_vals, 0, self.components.load['p_forecast'])
+        temp_vals = self.components['loads'].upper_bound - x['loadRedActPower'] - x['loadCutActPower']
+        x['loadENS'] = np.clip(temp_vals, 0, self.components['loads'].upper_bound)
         return
 
     def check_storage(self, x):
@@ -108,16 +117,14 @@ class HMRepair(BaseRepair):
 
         # Value clipping
         x['storDchActPower'] = np.clip(x['storDchActPower'], np.zeros(x['storDchActPower'].shape),
-                                       (np.ones(x['storDchActPower'].shape).transpose() * \
-                                        self.components.storage['p_discharge_max']).transpose())
+                                       self.components['stor'].discharge_max)
         x['storChActPower'] = np.clip(x['storChActPower'], np.zeros(x['storChActPower'].shape),
-                                      (np.ones(x['storChActPower'].shape).transpose() * self.components.storage[
-                                          'p_charge_max']).transpose())
+                                      self.components['stor'].charge_max)
 
         # Initial state of charge
-        x['storEnerState'][:, 0] = self.components.storage['energy_capacity'] * (self.components.storage['initial_state']) + \
-                                   x['storChActPower'][:, 0] * self.components.storage['charge_efficiency'] - \
-                                   x['storDchActPower'][:, 0] / self.components.storage['discharge_efficiency']
+        x['storEnerState'][:, 0] = self.components['stor'].capacity_max * self.components['stor'].initial_charge + \
+                                   x['storChActPower'][:, 0] * self.components['stor'].charge_efficiency - \
+                                   x['storDchActPower'][:, 0] / self.components['stor'].discharge_efficiency
 
         # Initialize the iterator and range (we already did the initial timestep!)
         t: int = 1
@@ -127,35 +134,34 @@ class HMRepair(BaseRepair):
         for t in t_range:
             # Check if charging
             mask = x['storChXo'][:, t] > np.zeros(x['storChXo'][:, t].shape)
-            charged = x['storChActPower'][:, t] * (1 - self.components.storage['charge_efficiency'])
+            charged = x['storChActPower'][:, t] * (1 - self.components['stor'].charge_efficiency)
 
             # Prevent over charging
-            secondary_mask = (x['storEnerState'][:, t - 1] + charged) > self.components.storage['energy_capacity']
+            secondary_mask = (x['storEnerState'][:, t - 1] + charged) > self.components['stor'].capacity_max
             x['storChActPower'][:, t][secondary_mask] = \
-                ((self.components.storage['energy_capacity'] - x['storEnerState'][:, t - 1]) / \
-                 (self.components.storage['charge_efficiency']))[secondary_mask]
+                ((self.components['stor'].capacity_max - x['storEnerState'][:, t - 1]) /
+                 self.components['stor'].charge_efficiency)[secondary_mask]
 
             # Check if discharging
             mask = x['storDchXo'][:, t] > np.zeros(x['storDchXo'][:, t].shape)
-            discharged = x['storDchActPower'][:, t] / self.components.storage['discharge_efficiency']
+            discharged = x['storDchActPower'][:, t] / self.components['stor'].discharge_efficiency
             secondary_mask = (x['storEnerState'][:, t - 1] - discharged) < 0
-            x['storDchActPower'][:, t][secondary_mask] = (x['storEnerState'][:, t - 1] * \
-                                                          self.components.storage['discharge_efficiency'])[secondary_mask]
+            x['storDchActPower'][:, t][secondary_mask] = (x['storEnerState'][:, t - 1] *
+                                                          self.components['stor'].discharge_efficiency)[secondary_mask]
 
             # Update the energy state
             x['storChActPower'][:, t] *= x['storChXo'][:, t]
             x['storDchActPower'][:, t] *= x['storDchXo'][:, t]
 
-            x['storEnerState'][:, t] = x['storEnerState'][:, t - 1] + x['storChActPower'][:, t] * self.components.storage[
-                'charge_efficiency'] - \
-                                       x['storDchActPower'][:, t] / self.components.storage['discharge_efficiency']
+            x['storEnerState'][:, t] = x['storEnerState'][:, t - 1] + x['storChActPower'][:, t] * \
+                                       self.components['stor'].charge_efficiency - \
+                                       x['storDchActPower'][:, t] / self.components['stor'].discharge_efficiency
 
             # Check minimum energy state
-            mask = x['storEnerState'][:, t] < self.components.storage['energy_capacity'] * self.components.storage[
-                'energy_min_percentage'] - \
-                   x['EminRelaxStor'][:, t]
-            x['storEnerState'][:, t][mask] = self.components.storage['energy_capacity'][mask] * \
-                                             self.components.storage['energy_min_percentage'][mask] - \
+            mask = x['storEnerState'][:, t] < self.components['stor'].capacity_max * \
+                   self.components['stor'].capacity_min - x['EminRelaxStor'][:, t]
+            x['storEnerState'][:, t][mask] = self.components['stor'].capacity_max[mask] * \
+                                             self.components['stor'].capacity_min[mask] - \
                                              x['EminRelaxStor'][:, t][mask]
 
         return
@@ -174,45 +180,46 @@ class HMRepair(BaseRepair):
         t_range = range(1, self.n_steps)
 
         # Clip the values of discharging and charging to the maximum allowed
-        x['v2gDchActPower'] = np.clip(x['v2gDchActPower'], 0, self.components.vehicle['schedule_discharge'])
-        x['v2gChActPower'] = np.clip(x['v2gChActPower'], 0, self.components.vehicle['schedule_charge'])
+        x['v2gDchActPower'] = np.clip(x['v2gDchActPower'], 0, self.components['evs'].schedule_discharge)
+        x['v2gChActPower'] = np.clip(x['v2gChActPower'], 0, self.components['evs'].schedule_charge)
 
         # Set initial EV state
-        x['v2gEnerState'][:, 0] = self.components.vehicle['e_capacity_max'] * 0.8
+        x['v2gEnerState'][:, 0] = self.components['evs'].capacity_max * 0.8
 
         # Fix the timestep dependencies
         for t in t_range:
             # Check if charging
             mask = x['v2gChXo'][:, t] > np.zeros(x['v2gChXo'][:, t].shape)
-            charged = x['v2gChActPower'][:, t] * (1 - self.components.vehicle['charge_efficiency'])
+            charged = x['v2gChActPower'][:, t] * (1 - self.components['evs'].charge_efficiency)
 
             # Prevent over charging
-            secondary_mask = (x['v2gEnerState'][:, t - 1] + charged) > self.components.vehicle['e_capacity_max']
-            x['v2gChActPower'][:, t][secondary_mask] = ((self.components.vehicle['e_capacity_max'] - \
+            secondary_mask = (x['v2gEnerState'][:, t - 1] + charged) > self.components['evs'].capacity_max
+            x['v2gChActPower'][:, t][secondary_mask] = ((self.components['evs'].capacity_max - \
                                                          x['v2gEnerState'][:, t - 1]) / \
-                                                        (self.components.vehicle['charge_efficiency']))[secondary_mask]
+                                                        (self.components['evs'].charge_efficiency))[secondary_mask]
 
             # Check if discharging
             mask = x['v2gDchXo'][:, t] > np.zeros(x['v2gDchXo'][:, t].shape)
-            discharged = x['v2gDchActPower'][:, t] / self.components.vehicle['discharge_efficiency']
+            discharged = x['v2gDchActPower'][:, t] / self.components['evs'].discharge_efficiency
             secondary_mask = (x['v2gEnerState'][:, t - 1] - discharged) < 0
-            x['v2gDchActPower'][:, t][secondary_mask] = (x['v2gEnerState'][:, t - 1] * \
-                                                         self.components.vehicle['discharge_efficiency'])[secondary_mask]
+            x['v2gDchActPower'][:, t][secondary_mask] = (x['v2gEnerState'][:, t - 1] *
+                                                         self.components['evs'].discharge_efficiency)[
+                secondary_mask]
 
             # Update the energy state
             x['v2gChActPower'][:, t] *= x['v2gChXo'][:, t]
             x['v2gDchActPower'][:, t] *= x['v2gDchXo'][:, t]
 
             x['v2gEnerState'][:, t] = x['v2gEnerState'][:, t - 1] + x['v2gChActPower'][:, t] * \
-                                      self.components.vehicle['charge_efficiency'] - \
-                                      x['v2gDchActPower'][:, t] / self.components.vehicle['discharge_efficiency']
+                                      self.components['evs'].charge_efficiency - \
+                                      x['v2gDchActPower'][:, t] / self.components['evs'].discharge_efficiency
 
             # Check minimum energy state
-            mask = x['v2gEnerState'][:, t] < self.components.vehicle['e_capacity_max'] * \
-                   self.components.vehicle['min_technical_soc'] - \
+            mask = x['v2gEnerState'][:, t] < self.components['evs'].capacity_max * \
+                   self.components['evs'].min_charge - \
                    x['EminRelaxEV'][:, t]
-            x['v2gEnerState'][:, t][mask] = self.components.vehicle['e_capacity_max'][mask] * \
-                                            self.components.vehicle['min_technical_soc'][mask] - \
+            x['v2gEnerState'][:, t][mask] = self.components['evs'].capacity_max[mask] * \
+                                            self.components['evs'].min_charge[mask] - \
                                             x['EminRelaxEV'][:, t][mask]
 
     def check_balance(self, x):
@@ -239,7 +246,7 @@ class HMRepair(BaseRepair):
             balance_loads[t] = np.sum([x['loadRedActPower'][l, t] + \
                                        x['loadCutActPower'][l, t] + \
                                        x['loadENS'][l, t] + \
-                                       -self.components.load['p_forecast'][l, t]
+                                       -self.components['loads'].upper_bound[l, t]
                                        for l in l_range])
 
             balance_stor[t] = np.sum([x['storDchActPower'][s, t] - x['storChActPower'][s, t] for s in s_range])

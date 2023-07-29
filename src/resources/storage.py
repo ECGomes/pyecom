@@ -14,6 +14,7 @@ class Storage(BaseResource):
                  cost_discharge: np.array,
                  cost_charge: np.array,
                  capacity_max: np.array,
+                 capacity_min: np.array,
                  initial_charge: np.array,
                  discharge_efficiency: np.array,
                  discharge_max: np.array,
@@ -24,6 +25,7 @@ class Storage(BaseResource):
         super().__init__(name, value, lower_bound, upper_bound, cost)
 
         self.capacity_max = capacity_max
+        self.capacity_min = capacity_min
         self.initial_charge = initial_charge
         self.charge_efficiency = charge_efficiency
         self.discharge_efficiency = discharge_efficiency
