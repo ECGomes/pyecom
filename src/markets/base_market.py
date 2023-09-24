@@ -44,9 +44,10 @@ class BaseMarket:
         """
         self.transaction_system = transaction_system
 
-    def set_pricing_system(self, pricing_system):
+    def set_pricing_system(self, pricing_system: BasePricingSystem):
         """
         Set the pricing system of the market
+        :type pricing_system: BasePricingSystem
         :param pricing_system: Pricing system to be used
         :return: None
         """
@@ -106,7 +107,7 @@ class BaseMarket:
                 return
 
             # Create a transaction based on the buyer, seller, item, quantity and price
-            transaction = self.transaction_system.execute(buyer, seller, item, quantity, price)
+            self.transaction_system.execute(buyer, seller, item, quantity, price)
 
             # Check again the buyers and sellers
             sellers = self.get_sellers(item)

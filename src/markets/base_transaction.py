@@ -1,7 +1,6 @@
 # Implements a transaction system for the market
 
 from .base_participant import BaseParticipant
-from .base_market import BaseMarket
 from .base_item import BaseItem
 
 
@@ -125,7 +124,7 @@ class BaseTransactionSystem:
                 seller: BaseParticipant,
                 item: BaseItem,
                 quantity: int,
-                price: float, timestamp) -> BaseTransaction:
+                price: float, timestamp) -> None:
 
         transaction = self.create_transaction(buyer=buyer,
                                               seller=seller,
@@ -145,4 +144,4 @@ class BaseTransactionSystem:
             # If the transaction was not executed, append it to the incomplete transactions list
             self.incomplete_transactions.append(transaction)
 
-        return transaction
+        return
