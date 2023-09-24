@@ -1,48 +1,113 @@
-# PyECOM's base market class
-# A market should be comprised of a set of agents, a set of products.
-#
-# A market should be able to:
-# - Get the market data
-# - Get the market
-# - Get the market's agents
-# - Get the market's products
-# - Get the market's transactions
-# - Get the market's transactions' prices
-# - Get the market's transactions' quantities
-# - Get the market's transactions' agents
-# - Get the market's transactions' products
-# - Get the market's transactions' timestamps
+# Base market class
+# A market should be comprised of:
+# - A set of agents
+# - A set of products, associated to a set of agents
+# - A transaction system
+# - A price system (can be in the form of an auction)
 
 from .base_participant import BaseParticipant
+from .base_transaction import BaseTransactionSystem
+from .base_pricing import BasePricingSystem
 from .base_item import BaseItem
 
 
 class BaseMarket:
 
     def __init__(self, participants: list[BaseParticipant]):
+        """
+        Base market class
+        :type participants: list[BaseParticipant]
+        :param participants: List of participants in the market
+        """
         self.participants = participants
-        self.transaction_history = []
+        self.transaction_system = None
+        self.pricing_system = None
         pass
 
-    def create_transaction(self,
-                           buyer: BaseParticipant,
-                           seller: BaseParticipant,
-                           item: BaseItem,
-                           quantity: float,
-                           price: float):
+    def __setattr__(self, key, value):
+        """
+        Prevents the user from changing the transaction system
+        :param key:
+        :param value:
+        """
+        if key == 'transaction_system':
+            if value is not None:
+                return
+        super().__setattr__(key, value)
 
-        # Create a transaction
-        transaction = {
-            'buyer': buyer,
-            'seller': seller,
-            'item': item,
-            'quantity': quantity,
-            'price': price
-        }
+    def set_transaction_system(self, transaction_system: BaseTransactionSystem):
+        """
+        Set the transaction system of the market
+        :type transaction_system: BaseTransactionSystem
+        :param transaction_system: Transaction system to be used
+        :return: None
+        """
+        self.transaction_system = transaction_system
 
-        # Add the transaction to the transaction history
-        self.transaction_history.append(transaction)
+    def set_pricing_system(self, pricing_system):
+        """
+        Set the pricing system of the market
+        :param pricing_system: Pricing system to be used
+        :return: None
+        """
+        self.pricing_system = pricing_system
 
-        # Add the transaction to the buyer's and seller's logs
-        buyer.buy_log.append(transaction)
-        seller.sell_log.append(transaction)
+    def get_sellers(self, item: BaseItem):
+        """
+        Get the sellers of a given item
+        :type item: BaseItem
+        :param item: Item to be sold
+        :return: Sellers of a given item
+        """
+        sellers = []
+        for participant in self.participants:
+            if item.identifier in [temp.identifier for temp in participant.sell_stock]:
+                sellers.append(participant)
+        return sellers
+
+    def get_buyers(self, item: BaseItem):
+        """
+        Get the buyers of a given item
+        :type item: BaseItem
+        :param item: Item to be bought
+        :return:
+        """
+        buyers = []
+        for participant in self.participants:
+            if item.identifier in [temp.identifier for temp in participant.buy_stock]:
+                buyers.append(participant)
+        return buyers
+
+    def iterate(self, item: BaseItem):
+        """
+        Solve the market
+        :param item: Item to be sold
+        :return: None
+        """
+        # Get the sellers and buyers
+        sellers = self.get_sellers(item)
+        buyers = self.get_buyers(item)
+
+        # Iterate while there are buyers
+        while len(buyers) > 0:
+            # Solve the market
+            buyer, seller, item, quantity, price = self.pricing_system.solve(buyers, sellers, item)
+
+            # If there is no buyer, return
+            if buyer is None:
+                return
+
+            # If there is no seller, return
+            if seller is None:
+                return
+
+            # If the quantity is 0, return
+            if quantity == 0:
+                return
+
+            # Create a transaction based on the buyer, seller, item, quantity and price
+            transaction = self.transaction_system.execute(buyer, seller, item, quantity, price)
+
+            # Check again the buyers and sellers
+            sellers = self.get_sellers(item)
+            buyers = self.get_buyers(item)

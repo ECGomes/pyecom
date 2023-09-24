@@ -99,3 +99,16 @@ class BaseParticipant:
 
         # If there is no item, return 0
         return 0
+
+    @staticmethod
+    def get_stock_price(stock, item) -> float:
+
+        # Get the item from the buy stock
+        temp = [temp for temp in stock if temp.identifier == item]
+
+        # If there is an item, return its price
+        if len(temp) > 0:
+            return temp[0].price
+
+        # If there is no item, return 0
+        return 0.0

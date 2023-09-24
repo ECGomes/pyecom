@@ -125,7 +125,7 @@ class BaseTransactionSystem:
                 seller: BaseParticipant,
                 item: BaseItem,
                 quantity: int,
-                price: float, timestamp):
+                price: float, timestamp) -> BaseTransaction:
 
         transaction = self.create_transaction(buyer=buyer,
                                               seller=seller,
@@ -145,4 +145,4 @@ class BaseTransactionSystem:
             # If the transaction was not executed, append it to the incomplete transactions list
             self.incomplete_transactions.append(transaction)
 
-        return
+        return transaction
