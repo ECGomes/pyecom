@@ -33,8 +33,9 @@ class HMProblemPymoo(Problem):
         self.xu = self.encode(self.xu_dict)
 
         # Storage and V2G battery parameters
-        # To calculate these parameters, we use the following formula:
-
+        # To calculate these parameters, we use the following formula
+        # Provided in utils/battery/parameter_calculation.py
+        # Each element of the list is for a different battery
         self.storCapCost = [0.05250, 0.10500, 0.01575]
         self.v2gCapCost = [0.042, 0.063, 0.042, 0.042, 0.063]
 
