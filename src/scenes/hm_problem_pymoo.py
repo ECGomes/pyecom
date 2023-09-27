@@ -32,9 +32,13 @@ class HMProblemPymoo(Problem):
         self.xl = self.encode(self.xl_dict)
         self.xu = self.encode(self.xu_dict)
 
+        # Storage and V2G battery parameters
+        # To calculate these parameters, we use the following formula:
+
         self.storCapCost = [0.05250, 0.10500, 0.01575]
         self.v2gCapCost = [0.042, 0.063, 0.042, 0.042, 0.063]
 
+        # Placeholder for the objective function
         self.objFn = 0.0
 
         # Call the super class
