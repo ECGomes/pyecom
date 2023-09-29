@@ -14,8 +14,8 @@ class BasePricingSystem:
         pass
 
     @staticmethod
-    def get_lowest_seller(sellers: list[BaseParticipant],
-                          item: BaseItem) -> Union[BaseParticipant, None]:
+    def get_sorted_sellers(sellers: list[BaseParticipant],
+                           item: BaseItem) -> list[BaseParticipant]:
         """
         Get the lowest price of an item
         :param sellers: Seller list
@@ -26,18 +26,15 @@ class BasePricingSystem:
         item_sellers = [seller for seller in sellers if seller.get_stock_quantity(seller.sell_stock,
                                                                                   item) > 0]
 
-        # If there are no sellers, return None
-        if len(item_sellers) == 0:
-            return None
         # We don't need to sort if there is only one seller
-        elif len(item_sellers) == 1:
-            return item_sellers[0]
+        if len(item_sellers) == 1:
+            return item_sellers
 
         # Sort the sellers by price
         item_sellers.sort(key=lambda x: x.get_stock_quantity(x.sell_stock, item))
 
         # Return the lowest price
-        return item_sellers[0]
+        return item_sellers
 
     def solve(self,
               buyers: list[BaseParticipant],
@@ -55,9 +52,10 @@ class BasePricingSystem:
 
 class BaseAuction(BasePricingSystem):
 
-    def __init__(self, price_increment: float = 0.1, **kwargs):
+    def __init__(self, price_increment: float = 0.1, round_limit: int = 5, **kwargs):
         super().__init__(**kwargs)
         self.price_increment = price_increment
+        self.round_limit = round_limit
 
     def bid(self,
             buyers: list[BaseParticipant],
@@ -71,11 +69,15 @@ class BaseAuction(BasePricingSystem):
         :return: Winner of the auction
         """
 
-        lowest_seller = self.get_lowest_seller(sellers, item)
+        # Get the sellers sorted by price
+        possible_sellers = self.get_sorted_sellers(sellers, item)
+        lowest_seller = None
         current_price = None
+        current_round = 0
 
         # Check the price of the lowest seller
-        if lowest_seller is not None:
+        if len(possible_sellers) > 0:
+            lowest_seller = possible_sellers[0]
             current_price = lowest_seller.get_stock_price(lowest_seller.sell_stock, item)
         else:
             # If there are no sellers, set the lowest price to the baseline price
@@ -86,19 +88,47 @@ class BaseAuction(BasePricingSystem):
         possible_buyers = [buyer for buyer in buyers if buyer.get_stock_quantity(buyer.buy_stock, item) > 0]
 
         # Iterate while there are buyers
-        while len(possible_buyers) > 0:
+        while len(possible_buyers) > 0 and len(possible_sellers) > 0:
+
+            # If the price is higher than the baseline price, set it to the baseline price
+            if current_price >= self.baseline_price:
+                current_price = self.baseline_price
+
+            # Check additional sellers if possible
+            if len(possible_sellers) > 1:
+                next_seller = possible_sellers[1]
+                next_price = next_seller.get_stock_price(next_seller.sell_stock, item)
+                if next_price < current_price:
+                    current_price = next_price
+                    lowest_seller = next_seller
 
             # Get the buyers that can pay the price
-            possible_buyers = [buyer for buyer in possible_buyers if buyer.budget >= current_price]
+            possible_buyers = [buyer for buyer in possible_buyers if buyer.max_bid >= current_price]
+
+            print(f"Current price: {current_price}")
+            print(f"Possible buyers: {len(possible_buyers)}")
 
             # If there is more than, increase the price
             if len(possible_buyers) > 1:
                 current_price += self.price_increment
-            else:
+                current_round += 1
+
+                # If the round limit is reached, return the first option
+                if current_round >= self.round_limit:
+                    return possible_buyers[0], lowest_seller, item, \
+                        possible_buyers[0].get_stock_quantity(possible_buyers[0].buy_stock,
+                                                              item), current_price
+            elif len(possible_buyers) == 1:
                 return possible_buyers[0], lowest_seller, item, \
-                    possible_buyers[0].get_stock_quantity(item), current_price
+                    possible_buyers[0].get_stock_quantity(possible_buyers[0].buy_stock,
+                                                          item), current_price
 
-        return
+        print("No buyers or sellers found")
 
-    def solve(self, **kwargs):
-        return self.bid(**kwargs)
+        return None, None, None, 0.0, 0.0
+
+    def solve(self, buyers: list[BaseParticipant],
+              sellers: list[BaseParticipant],
+              item: BaseItem) -> Union[tuple[BaseParticipant, BaseParticipant, BaseItem, int, float], None]:
+
+        return self.bid(buyers, sellers, item)

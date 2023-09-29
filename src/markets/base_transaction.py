@@ -24,18 +24,11 @@ class BaseTransaction:
         self.completed = False
         self.completed_timestamp = None
 
-    def __setattr__(self, key, value):
-        # Prevents the user from changing the verified, executed and completed properties
-        if key == 'verified':
-            if value:
-                return
-        if key == 'executed':
-            if value:
-                return
-        if key == 'completed':
-            if value:
-                return
-        super().__setattr__(key, value)
+    def __repr__(self):
+        return f'{self.buyer.name} bought {self.quantity} ' \
+               f'of {self.item.identifier} from {self.seller.name} ' \
+               f'for {self.price * self.quantity} ' \
+               f'at {self.price} per unit'
 
 
 class BaseTransactionSystem:
@@ -135,6 +128,8 @@ class BaseTransactionSystem:
         transaction = self.verify_transaction(transaction=transaction, timestamp=timestamp)
 
         transaction = self.execute_transaction(transaction=transaction, timestamp=timestamp)
+
+        print(transaction)
 
         # Check if the transaction was executed
         if transaction.executed:

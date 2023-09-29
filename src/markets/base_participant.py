@@ -32,6 +32,10 @@ class BaseParticipant:
         self.buy_log = []
         self.sell_log = []
 
+    # Representation of the participant
+    def __repr__(self):
+        return f'{self.name}'
+
     @staticmethod
     def merge_stock(stock):
 
@@ -58,7 +62,7 @@ class BaseParticipant:
     def sell(self, item, quantity, price):
 
         # Get the item from the sell stock
-        temp = [temp for temp in self.sell_stock if temp.identifier == item]
+        temp = [temp for temp in self.sell_stock if temp.identifier == item.identifier]
 
         # Remove quantity from the item
         temp[0].quantity -= quantity
@@ -74,10 +78,10 @@ class BaseParticipant:
     def buy(self, item, quantity, price):
 
         # Get the item from the buy stock
-        temp = [temp for temp in self.buy_stock if temp.identifier == item]
+        temp = [temp for temp in self.buy_stock if temp.identifier == item.identifier]
 
         # Remove quantity from the item
-        temp[0].quantity += quantity
+        temp[0].quantity -= quantity
 
         # Remove from the budget
         self.budget -= quantity * price
@@ -91,7 +95,7 @@ class BaseParticipant:
     def get_stock_quantity(stock, item) -> int:
 
         # Get the item from the buy stock
-        temp = [temp for temp in stock if temp.identifier == item]
+        temp = [temp for temp in stock if temp.identifier == item.identifier]
 
         # If there is an item, return its quantity
         if len(temp) > 0:
@@ -104,7 +108,7 @@ class BaseParticipant:
     def get_stock_price(stock, item) -> float:
 
         # Get the item from the buy stock
-        temp = [temp for temp in stock if temp.identifier == item]
+        temp = [temp for temp in stock if temp.identifier == item.identifier]
 
         # If there is an item, return its price
         if len(temp) > 0:

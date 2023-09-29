@@ -4,6 +4,7 @@
 # - A set of products, associated to a set of agents
 # - A transaction system
 # - A price system (can be in the form of an auction)
+from typing import Union
 
 from .base_participant import BaseParticipant
 from .base_transaction import BaseTransactionSystem
@@ -13,7 +14,7 @@ from .base_item import BaseItem
 
 class BaseMarket:
 
-    def __init__(self, participants: list[BaseParticipant]):
+    def __init__(self, participants: list[BaseParticipant], timestamp: Union[str, int] = 'timestamp'):
         """
         Base market class
         :type participants: list[BaseParticipant]
@@ -22,18 +23,15 @@ class BaseMarket:
         self.participants = participants
         self.transaction_system = None
         self.pricing_system = None
-        pass
 
-    def __setattr__(self, key, value):
-        """
-        Prevents the user from changing the transaction system
-        :param key:
-        :param value:
-        """
-        if key == 'transaction_system':
-            if value is not None:
-                return
-        super().__setattr__(key, value)
+        # Timestamp
+        self.timestamp = None
+        if timestamp == 'timestamp':
+            import time
+            self.timestamp = time.time()
+        else:
+            self.timestamp = timestamp if isinstance(timestamp, int) else int(timestamp)
+        pass
 
     def set_transaction_system(self, transaction_system: BaseTransactionSystem):
         """
@@ -63,7 +61,8 @@ class BaseMarket:
         sellers = []
         for participant in self.participants:
             if item.identifier in [temp.identifier for temp in participant.sell_stock]:
-                sellers.append(participant)
+                if participant.get_stock_quantity(participant.sell_stock, item) > 0:
+                    sellers.append(participant)
         return sellers
 
     def get_buyers(self, item: BaseItem):
@@ -76,7 +75,8 @@ class BaseMarket:
         buyers = []
         for participant in self.participants:
             if item.identifier in [temp.identifier for temp in participant.buy_stock]:
-                buyers.append(participant)
+                if participant.get_stock_quantity(participant.buy_stock, item) > 0:
+                    buyers.append(participant)
         return buyers
 
     def iterate(self, item: BaseItem):
@@ -90,7 +90,7 @@ class BaseMarket:
         buyers = self.get_buyers(item)
 
         # Iterate while there are buyers
-        while len(buyers) > 0:
+        while len(buyers) > 0 or len(sellers) == 0:
             # Solve the market
             buyer, seller, item, quantity, price = self.pricing_system.solve(buyers, sellers, item)
 
@@ -106,9 +106,10 @@ class BaseMarket:
             if quantity == 0:
                 return
 
-            # Create a transaction based on the buyer, seller, item, quantity and price
-            self.transaction_system.execute(buyer, seller, item, quantity, price)
+            print(price)
 
-            # Check again the buyers and sellers
-            sellers = self.get_sellers(item)
-            buyers = self.get_buyers(item)
+            # Create a transaction based on the buyer, seller, item, quantity and price
+            self.transaction_system.execute(buyer, seller, item, quantity, price,
+                                            timestamp=self.timestamp)
+
+        print('No buyers and/or sellers found.')
