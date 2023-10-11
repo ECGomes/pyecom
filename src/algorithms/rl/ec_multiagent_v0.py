@@ -16,11 +16,13 @@ class EnergyCommunityMultiEnv_v0(MultiAgentEnv):
 
         # Define the resources
         self.resources = resources
-        self.generators = [resource for resource in self.resources if resource.name == 'generator']
+        self.generators = [resource for resource in self.resources
+                           if resource.name.startswith('gen')]
         self.storages = [resource for resource in self.resources if resource.name == 'storage']
-        self.loads = [resource for resource in self.resources if resource.name == 'load']
+        self.loads = [resource for resource in self.resources
+                      if resource.name.startswith('load')]
         self.evs = [resource for resource in self.resources if resource.name == 'ev']
-        self.__separate_resources__()
+        #self.__separate_resources__()
 
         # Define illegal costs for components
         self.illegal_ev_cost = 0.0
@@ -30,14 +32,16 @@ class EnergyCommunityMultiEnv_v0(MultiAgentEnv):
         self.illegal_export_cost = 50.0
 
         # Production specification
-        self.gen_production = OrderedDict([(self.generators[i].name, self.generators[i].upper_bound)
+        self.gen_production = OrderedDict([(self.generators[i].name,
+                                            self.generators[i].upper_bound)
                                            for i in range(len(self.generators))])
 
         self.gen_max = sum(self.gen_production.values())
 
         # Loads
         load_factor = 5.0
-        self.load_consumption = OrderedDict([(self.loads[i].name, self.load_consumption[self.loads[i].name])
+        self.load_consumption = OrderedDict([(self.loads[i].name,
+                                              self.loads[i].value)
                                              for i in range(len(self.loads))])
 
         self.import_max = 100.0
