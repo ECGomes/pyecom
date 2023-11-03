@@ -73,6 +73,7 @@ Complemented with the following time-series:
 - Generator Power Forecast (kW)
 - Cost Parameter A
 - Cost Parameter B
+  - This is the value used for the cost function of the generator
 - Cost Parameter C
 - Cost Excess Power (€)
 - Green House Gas Coefficient A (kgCO2eq/kWh)
@@ -169,3 +170,16 @@ To add a new Load, the following steps must be followed:
 To add a new event to a vehicle, the following steps must be followed:
 1. Add a new column to the Vehicle sheet, with the ID of the new event
 2. Add the information of the new event to the corresponding rows
+
+## 4. Limitations
+While the Excel file can be modified to add new resources and events, PyECOM has some limitations.
+
+Data parser built does not consider more than two events per vehicle
+- If more than two events are added, the first two will be used.
+
+While owner and manager information are presented in the Excel file, PyECOM does not consider them
+- Data parser considers and retrieves this information
+- All resources are considered to be owned and managed by the same entity
+- To make use of this information, the user must extend the resource classes and provide the information given by the parser
+
+IMPORTANT: PyECOM does not consider more than two events per vehicle. If more than two events are added, the first two will be used.
