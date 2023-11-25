@@ -185,13 +185,13 @@ class HMParser(BaseParser):
                    'energy_capacity': self.get_characteristic(data_storage,
                                                               'Energy Capacity (kVAh)'),
                    'energy_min_percentage': self.get_characteristic(data_storage,
-                                                                    'Energy Min (%)')/100.0,
+                                                                    'Energy Min (%)') / 100.0,
                    'charge_efficiency': self.get_characteristic(data_storage,
-                                                                'Charge Efficiency (%)')/100.0,
+                                                                'Charge Efficiency (%)') / 100.0,
                    'discharge_efficiency': self.get_characteristic(data_storage,
-                                                                   'Discharge Efficiency (%)')/100.0,
+                                                                   'Discharge Efficiency (%)') / 100.0,
                    'initial_state': self.get_characteristic(data_storage,
-                                                            'Initial State (%)')/100.0,
+                                                            'Initial State (%)') / 100.0,
                    'p_charge_max': self.get_characteristic(data_storage,
                                                            'P Charge Max (kW)'),
                    'p_discharge_max': self.get_characteristic(data_storage,
@@ -276,9 +276,9 @@ class HMParser(BaseParser):
                    'used_soc_percentage_arriving': self.get_events(data_v2g,
                                                                    'Used SOC (%) Arriving'),
                    'soc_percentage_arriving': self.get_events(data_v2g,
-                                                              'SOC (%) Arriving')/100.0,
+                                                              'SOC (%) Arriving') / 100.0,
                    'soc_required_exit': self.get_events(data_v2g,
-                                                        'SOC Required (%) Exit')/100.0,
+                                                        'SOC Required (%) Exit') / 100.0,
                    'p_charge_max_contracted': self.get_events(data_v2g,
                                                               'Pcharge Max contracted [kW]'),
                    'p_discharge_max_contracted': self.get_events(data_v2g,
@@ -308,17 +308,19 @@ class HMParser(BaseParser):
                    'initial_soc_percentage': self.get_characteristic(data_v2g,
                                                                      'Initial State SOC (%)'),
                    'min_technical_soc': self.get_characteristic(data_v2g,
-                                                                'Minimun Technical SOC (%)')/100.0}
+                                                                'Minimun Technical SOC (%)') / 100.0}
 
         # Calculates the schedule for arrivals and departures
         schedule = np.zeros((vehicle['p_charge_max'].shape[0], self.generator['p_forecast'].shape[1]))
         schedule_charge = np.zeros((vehicle['p_charge_max'].shape[0], self.generator['p_forecast'].shape[1]))
         schedule_discharge = np.zeros((vehicle['p_charge_max'].shape[0], self.generator['p_forecast'].shape[1]))
+        schedule_arrival_soc = np.zeros((vehicle['p_charge_max'].shape[0], self.generator['p_forecast'].shape[1]))
+        schedule_departure_soc = np.zeros((vehicle['p_charge_max'].shape[0], self.generator['p_forecast'].shape[1]))
         for v in range(vehicle['p_charge_max'].shape[0]):
 
             # Check the trips
-            for t in range(2):
-                schedule[v, int(vehicle['arrive_time_period'][v, t])-1:
+            for t in range(vehicle['soc_required_exit'].shape[1]):
+                schedule[v, int(vehicle['arrive_time_period'][v, t]) - 1:
                             int(vehicle['departure_time_period'][v, t])] = 1.0
 
                 current_place = int(vehicle['place'][v, t]) - 1
@@ -331,15 +333,23 @@ class HMParser(BaseParser):
                                     self.charging_station['p_discharge_max'][current_place])
 
                 # build the schedule
-                schedule_charge[v, int(vehicle['arrive_time_period'][v, t])-1:
+                schedule_charge[v, int(vehicle['arrive_time_period'][v, t]) - 1:
                                    int(vehicle['departure_time_period'][v, t])] = charge_max
 
-                schedule_discharge[v, int(vehicle['arrive_time_period'][v, t])-1:
+                schedule_discharge[v, int(vehicle['arrive_time_period'][v, t]) - 1:
                                       int(vehicle['departure_time_period'][v, t])] = discharge_max
+
+                schedule_arrival_soc[v, int(vehicle['arrive_time_period'][v, t]) - 1] = vehicle['soc_percentage_arriving'][v, t] * \
+                                                                                        vehicle['e_capacity_max'][v]
+
+                schedule_departure_soc[v, int(vehicle['departure_time_period'][v, t]) - 1] = vehicle['soc_required_exit'][v, t] * \
+                                                                                             vehicle['e_capacity_max'][v]
 
         vehicle['schedule'] = schedule
         vehicle['schedule_charge'] = schedule_charge
         vehicle['schedule_discharge'] = schedule_discharge
+        vehicle['schedule_arrival_soc'] = schedule_arrival_soc
+        vehicle['schedule_departure_soc'] = schedule_departure_soc
 
         self.vehicle = vehicle
         return
