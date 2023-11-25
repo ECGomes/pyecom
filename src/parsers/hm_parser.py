@@ -316,6 +316,8 @@ class HMParser(BaseParser):
         schedule_discharge = np.zeros((vehicle['p_charge_max'].shape[0], self.generator['p_forecast'].shape[1]))
         schedule_arrival_soc = np.zeros((vehicle['p_charge_max'].shape[0], self.generator['p_forecast'].shape[1]))
         schedule_departure_soc = np.zeros((vehicle['p_charge_max'].shape[0], self.generator['p_forecast'].shape[1]))
+        schedule_cs_usage = np.zeros((self.charging_station['p_charge_limit'].shape[0],
+                                      vehicle['p_charge_max'].shape[0], self.generator['p_forecast'].shape[1]))
         for v in range(vehicle['p_charge_max'].shape[0]):
 
             # Check the trips
@@ -324,6 +326,10 @@ class HMParser(BaseParser):
                             int(vehicle['departure_time_period'][v, t])] = 1.0
 
                 current_place = int(vehicle['place'][v, t]) - 1
+
+                # Get the charging station usage
+                schedule_cs_usage[current_place, v, int(vehicle['arrive_time_period'][v, t]) - 1:
+                                                    int(vehicle['departure_time_period'][v, t])] += 1.0
 
                 # get the maximum allowed charging and discharging
                 charge_max = min(vehicle['p_charge_max'][v],
@@ -350,6 +356,7 @@ class HMParser(BaseParser):
         vehicle['schedule_discharge'] = schedule_discharge
         vehicle['schedule_arrival_soc'] = schedule_arrival_soc
         vehicle['schedule_departure_soc'] = schedule_departure_soc
+        vehicle['schedule_cs_usage'] = schedule_cs_usage
 
         self.vehicle = vehicle
         return
