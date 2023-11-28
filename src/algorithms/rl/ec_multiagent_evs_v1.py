@@ -5,12 +5,16 @@ from ...resources.vehicle import Vehicle
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
 
 
-class EVMultiAgent_v0(MultiAgentEnv):
+class EVMultiAgent_v1(MultiAgentEnv):
     """
     A multi-agent environment for the EV charging problem.
-    Penalties are applied for EVs not being charged at time of departure;
-    Reward at each timestep is the negative sum of penalties:
-    reward = - penalty
+    Penalties are applied for EVs not being charged at time of departure and illegal actions;
+    Reward at each timestep is the negative sum of penalties and charging costs:
+    reward = - (penalty + charging_cost)
+
+    Penalties for illegal actions are applied as follows:
+    penalty_action = coefficient * (action_delta)^2
+    where action_delta is the difference between the current action and the allowed bounds
 
     Penalty for not being charged at time of departure is applied as a constant
 
@@ -30,6 +34,7 @@ class EVMultiAgent_v0(MultiAgentEnv):
     """
 
     def __init__(self, resources: list[Vehicle],
+                 penalty_action_coefficient: float = 1000,
                  penalty_not_charged: float = 1000,
                  energy_price: np.array = None,
                  ):
@@ -41,6 +46,7 @@ class EVMultiAgent_v0(MultiAgentEnv):
         self.evs = resources.copy()
 
         # Define penalties
+        self.penalty_action_coefficient = penalty_action_coefficient
         self.penalty_not_charged = penalty_not_charged
 
         # Initialize timestep counter
@@ -176,10 +182,11 @@ class EVMultiAgent_v0(MultiAgentEnv):
                 soc = self.agents[ev].value
 
                 # Do action and get results
-                updated_soc, charge, discharge, penalty_charge = self._do_action(self.agents[ev], action_dict[ev])
+                updated_soc, charge, discharge, cost, \
+                    penalty_action, penalty_charge = self._do_action(self.agents[ev], action_dict[ev])
 
                 # Calculate reward
-                reward = self._get_reward(penalty_charge)
+                reward = self._get_reward(cost, penalty_charge)
 
                 # Save the results
                 action_results[ev] = {'initial_soc': soc,
@@ -187,6 +194,7 @@ class EVMultiAgent_v0(MultiAgentEnv):
                                       'required_soc': self.agents[ev].schedule_requirement_soc[self.current_timestep],
                                       'charge': charge,
                                       'discharge': discharge,
+                                      'cost': cost,
                                       'penalty_charge': penalty_charge,
                                       'reward': reward}
 
@@ -222,15 +230,16 @@ class EVMultiAgent_v0(MultiAgentEnv):
 
         return observations, rewards, terminations, truncations, info
 
-    def _do_action(self, ev, action) -> (float, float, float, float):
+    def _do_action(self, ev, action) -> (float, float, float, float, float):
         """
         Returns the connected state of the EV, the charge and discharge values, as well as the discharge cost.
         :param action: dictionary with action_value and action_indicator
         :return: value, charge, discharge, cost, penalty_action, penalty_charge
         """
 
-        # Initialize penalty
+        # Initialize penalty and costs
         penalty_charge = 0.0
+        cost = 0.0
 
         # Get the action
         action_value = action['action_value'][0]
@@ -244,7 +253,7 @@ class EVMultiAgent_v0(MultiAgentEnv):
         # Check if EV is connected
         if connected == 0:
             ev.value = 0.0
-            return ev.value, charge, discharge, penalty_charge
+            return ev.value, charge, discharge, cost, penalty_charge
 
         # Check if EV is arriving
         if ev.schedule_arrival_soc[self.current_timestep] > 0:
@@ -269,6 +278,13 @@ class EVMultiAgent_v0(MultiAgentEnv):
             # If not, set the next state to the max charge
             charge = ev.capacity_max - ev.value
 
+        # Get the cost
+        if charge > 0:
+            cost = self.energy_price[self.current_timestep] * action_value
+
+        if discharge > 0:
+            cost = -self.energy_price[self.current_timestep] * action_value
+
         # Update the EV
         ev.value = ev.value + charge - discharge
 
@@ -277,7 +293,7 @@ class EVMultiAgent_v0(MultiAgentEnv):
             if ev.value < ev.schedule_requirement_soc[self.current_timestep]:
                 penalty_charge += self.penalty_not_charged
 
-        return ev.value, charge, discharge, penalty_charge
+        return ev.value, charge, discharge, cost, penalty_charge
 
-    def _get_reward(self, penalty_charge):
-        return -penalty_charge
+    def _get_reward(self, cost, penalty_charge):
+        return -cost - penalty_charge
