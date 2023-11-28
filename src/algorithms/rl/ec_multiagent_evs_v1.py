@@ -12,10 +12,6 @@ class EVMultiAgent_v1(MultiAgentEnv):
     Reward at each timestep is the negative sum of penalties and charging costs:
     reward = - (penalty + charging_cost)
 
-    Penalties for illegal actions are applied as follows:
-    penalty_action = coefficient * (action_delta)^2
-    where action_delta is the difference between the current action and the allowed bounds
-
     Penalty for not being charged at time of departure is applied as a constant
 
     There are no restrictions for energy drawn from the grid, but the energy price can be defined
@@ -34,7 +30,6 @@ class EVMultiAgent_v1(MultiAgentEnv):
     """
 
     def __init__(self, resources: list[Vehicle],
-                 penalty_action_coefficient: float = 1000,
                  penalty_not_charged: float = 1000,
                  energy_price: np.array = None,
                  ):
@@ -46,7 +41,6 @@ class EVMultiAgent_v1(MultiAgentEnv):
         self.evs = resources.copy()
 
         # Define penalties
-        self.penalty_action_coefficient = penalty_action_coefficient
         self.penalty_not_charged = penalty_not_charged
 
         # Initialize timestep counter
@@ -182,8 +176,7 @@ class EVMultiAgent_v1(MultiAgentEnv):
                 soc = self.agents[ev].value
 
                 # Do action and get results
-                updated_soc, charge, discharge, cost, \
-                    penalty_action, penalty_charge = self._do_action(self.agents[ev], action_dict[ev])
+                updated_soc, charge, discharge, cost, penalty_charge = self._do_action(self.agents[ev], action_dict[ev])
 
                 # Calculate reward
                 reward = self._get_reward(cost, penalty_charge)

@@ -34,8 +34,8 @@ class EVMultiAgent_v2(MultiAgentEnv):
     """
 
     def __init__(self, resources: list[Vehicle],
-                 penalty_action_coefficient: float = 1000,
-                 penalty_not_charged: float = 1000,
+                 penalty_action_coefficient: float = 1.0,
+                 penalty_not_charged: float = 1000.0,
                  energy_price: np.array = None,
                  ):
         super().__init__()
