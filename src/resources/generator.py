@@ -22,6 +22,25 @@ class Generator(BaseResource):
         self.gen_nde = np.zeros(self.value.shape)
         self.cost_nde = cost_nde
 
+    def sample(self, method: str = 'normal') -> np.array:
+        """
+        Samples timeseries from the generator values
+        Methods available: uniform, normal, poisson, exponential
+        :param method:
+        :return:
+        """
+
+        if method == 'uniform':
+            return np.random.uniform(self.lower_bound.tolist(), self.upper_bound.tolist())
+        elif method == 'normal':
+            return np.random.normal(self.value.tolist(), (self.value * 0.1).tolist())
+        elif method == 'poisson':
+            return np.random.poisson(self.value.tolist())
+        elif method == 'exponential':
+            return np.random.exponential(self.value.tolist())
+        else:
+            raise ValueError(f"Method {method} not supported")
+
 
 class GeneratorProbabilistic(Generator):
 
