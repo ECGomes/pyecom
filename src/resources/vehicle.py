@@ -52,3 +52,55 @@ class Vehicle(BaseResource):
         self.schedule_connected = schedule_connected
         self.schedule_requirement_soc = schedule_requirement_soc
         self.schedule_arrival_soc = schedule_arrival_soc
+
+    def sample(self,
+               avg_daily_trips: int = 2, stddev_daily_trips: int = 1,
+               avg_soc_arrival_percentage: float = 0.2, stddev_soc_arrival_percentage: float = 0.1,
+               avg_soc_departure_percentage: float = 0.3, stddev_soc_departure_percentage: float = 0.1,
+               n_timeslots: int = 24):
+        """
+        Creates new samples for the vehicle
+        :param avg_daily_trips: Average daily trips to be made by the vehicle
+        :param stddev_daily_trips: Standard deviation of the daily trips to be made by the vehicle
+        :param avg_soc_arrival_percentage: Average percentage of the battery the EV will arrive with
+        :param stddev_soc_arrival_percentage: Standard deviation of the percentage of the battery on arrival
+        :param avg_soc_departure_percentage: Average percentage of the battery that will be used per trip
+        :param stddev_soc_departure_percentage: Standard deviation of the percentage of the battery on departure
+        :param n_timeslots: Number of timeslots in the schedule
+        :return:
+        """
+
+        # Sample the number of trips using a normal distribution with center at avg_daily_trips
+        trips = int(np.random.normal(avg_daily_trips, stddev_daily_trips, 1)[0])
+
+        # Sample arrival and departure soc for scheduling
+        arrival_soc = np.random.normal(avg_soc_arrival_percentage,
+                                       stddev_soc_arrival_percentage, trips).round(2)
+        departure_soc = np.random.normal(avg_soc_departure_percentage,
+                                         stddev_soc_departure_percentage, trips).round(2)
+
+        # Create timeslots for the arrivals and departures
+        timeslots = np.random.choice(n_timeslots, trips * 2, replace=False)
+        timeslots = np.sort(timeslots)
+
+        # Create the schedules
+        schedule_connected = np.zeros(n_timeslots)
+        schedule_requirement_soc = np.zeros(n_timeslots)
+        schedule_arrival_soc = np.zeros(n_timeslots)
+        for i in range(trips):
+            # Connected
+            schedule_connected[timeslots[i * 2]:timeslots[i * 2 + 1]] = 1
+
+            # Requirement SOC
+            schedule_requirement_soc[timeslots[i * 2 + 1]] = departure_soc[i]
+
+            # Arrival SOC
+            schedule_arrival_soc[timeslots[i * 2]] = arrival_soc[i]
+
+        schedule_discharge = schedule_connected.copy() * np.max(self.schedule_discharge)
+        schedule_charge = schedule_connected.copy() * np.max(self.schedule_charge)
+
+        return trips, schedule_connected, \
+            schedule_discharge, schedule_charge, \
+            schedule_requirement_soc, schedule_arrival_soc
+
