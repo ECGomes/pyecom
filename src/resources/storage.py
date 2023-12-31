@@ -3,11 +3,12 @@
 import numpy as np
 from src.resources.base_resource import BaseResource
 
+from typing import Union
 
 class Storage(BaseResource):
     def __init__(self,
                  name: str,
-                 value: np.array,
+                 value: Union[np.array, float],
                  lower_bound: np.array,
                  upper_bound: np.array,
                  cost: np.array,
@@ -31,12 +32,15 @@ class Storage(BaseResource):
         self.discharge_efficiency = discharge_efficiency
         self.capital_cost = capital_cost
 
-        self.discharge = np.zeros(self.value.shape)
+        self.discharge = np.zeros(self.value.shape) \
+            if isinstance(value, np.ndarray) else 0.0
         self.discharge_max = discharge_max
         self.cost_discharge = cost_discharge
 
-        self.charge = np.zeros(self.value.shape)
+        self.charge = np.zeros(self.value.shape) \
+            if isinstance(value, np.ndarray) else 0.0
         self.charge_max = charge_max
         self.cost_charge = cost_charge
 
-        self.emin_relax = np.zeros(self.value.shape)
+        self.emin_relax = np.zeros(self.value.shape) \
+            if isinstance(value, np.ndarray) else 0.0

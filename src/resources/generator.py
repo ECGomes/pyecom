@@ -1,25 +1,28 @@
 # Extends the BaseResource class to provide a generator resource
+from typing import Union
 
 import numpy as np
 
 from src.resources.base_resource import BaseResource
-
+from typing import Union
 
 class Generator(BaseResource):
     def __init__(self,
                  name: str,
-                 value: np.array,
+                 value: Union[np.array, float],
                  lower_bound: np.array,
                  upper_bound: np.array,
                  cost: np.array,
                  cost_nde: np.array,
-                 is_renewable: np.array):
+                 is_renewable: Union[np.array, bool]):
         super().__init__(name, value, lower_bound, upper_bound, cost)
 
         self.is_renewable = is_renewable
-        self.is_active = np.zeros(self.value.shape)
+        self.is_active = np.zeros(self.value.shape) \
+            if isinstance(value, np.ndarray) else 0.0
 
-        self.gen_nde = np.zeros(self.value.shape)
+        self.gen_nde = np.zeros(self.value.shape) \
+            if isinstance(value, np.ndarray) else 0.0
         self.cost_nde = cost_nde
 
     def sample(self, method: str = 'normal') -> np.array:
