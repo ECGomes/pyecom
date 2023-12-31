@@ -224,6 +224,15 @@ class HMProblemScene(BaseScene):
                                 x['pExp'][t] * self.components['pexp'].cost[t]
                                 for t in t_range])
 
+        # print the components of the objective function for debugging
+        #print('temp_gens: ', temp_gens)
+        #print('temp_loads: ', temp_loads)
+        #print('temp_stor: ', temp_stor)
+        #print('temp_v2g: ', temp_v2g)
+        #print('temp_rest: ', temp_rest)
+        #print('balance_penalty: ', balance_penalty)
+        #print('\n')
+
         obj_fn = temp_gens + temp_loads + temp_stor + temp_v2g + temp_rest + balance_penalty
 
         return obj_fn
@@ -241,15 +250,22 @@ class HMProblemScene(BaseScene):
 
         # Evaluate the initial population
         # Requires a decoding and initial fix
+        current_pop_fitness = []
         for member_idx in np.arange(self.algo.population.shape[0]):
             member = self.decode(self.algo.population[member_idx])
             member = self.repair(member)
             member_fitness = self.evaluate(member)
 
             # Update the population fitness
-            self.objective_function_val.append(member_fitness)
+            current_pop_fitness.append(member_fitness)
             self.algo.population[member_idx] = self.encode(member)
             self.algo.population_fitness[member_idx] = member_fitness
+
+            # Since it's the first iteration, the old population is the same as the new population
+            self.algo.population_old = self.algo.population
+            self.algo.population_old_fitness = self.algo.population_fitness
+            self.algo.population_history.append(self.algo.population)
+        self.objective_function_val.append(current_pop_fitness)
 
         # Update the best fitness
         self.current_best_fitness = np.min(self.algo.population_fitness)
@@ -260,6 +276,7 @@ class HMProblemScene(BaseScene):
         self.algo.current_best_idx = self.current_best_idx
         self.algo.current_best = self.encode(self.current_best)
 
+        # Main loop
         for i in tqdm.tqdm(np.arange(self.algo.n_iter)):
 
             # Update algorithm iteration count
@@ -269,15 +286,17 @@ class HMProblemScene(BaseScene):
             self.algo.update_population()
 
             # Repair the new population
+            current_pop_fitness = []
             for member_idx in np.arange(self.algo.population.shape[0]):
                 member = self.decode(self.algo.population[member_idx])
                 member = self.repair(member)
                 member_fitness = self.evaluate(member)
 
                 # Update the population member and its fitness
-                self.objective_function_val.append(member_fitness)
+                current_pop_fitness.append(member_fitness)
                 self.algo.population[member_idx] = self.encode(member)
                 self.algo.population_fitness[member_idx] = member_fitness
+            self.objective_function_val.append(current_pop_fitness)
 
             # Update the best fitness
             self.current_best_fitness = np.min(self.algo.population_fitness)
@@ -287,9 +306,6 @@ class HMProblemScene(BaseScene):
             self.algo.current_best_fitness = self.current_best_fitness
             self.algo.current_best_idx = self.current_best_idx
             self.algo.current_best = self.encode(self.current_best)
-
-            # Elite selection
-            self.algo.selection_mechanism()
 
             # Update remaining parameters and history
             self.algo.post_update_cleanup()
