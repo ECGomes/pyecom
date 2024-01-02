@@ -92,7 +92,7 @@ class CommunityMetrics(BaseMetric):
         :param production: Production resources
         :return: Sum production of the community
         """
-        return np.sum([prod.value for prod in production])
+        return np.sum([prod.value for prod in production])[0]
 
     @staticmethod
     def cmd_total_consumed(consumption: np.ndarray) -> float:
@@ -102,7 +102,7 @@ class CommunityMetrics(BaseMetric):
         :return: Sum consumption of the community
         """
 
-        return np.sum([cons.value for cons in consumption])
+        return np.sum([cons.value for cons in consumption])[0]
 
     @staticmethod
     def cmd_import_export_balance(imports: np.ndarray, exports: np.ndarray) -> float:
