@@ -30,6 +30,23 @@ class HMProblemScene(BaseScene):
         self.n_stor = self.components['stor'].value.shape[0]
         self.n_v2g = self.components['evs'].value.shape[0]
 
+        # Cache the variables that should be expanded into matrices
+        # This is a quick fix for the problem of having to expand the variables and increase speed
+        # Storage
+        self.stor_capital_cost = np.tile(self.components['stor'].capital_cost.reshape(-1, 1),
+                                         (1, self.n_steps))
+        self.stor_capacity_max = np.tile(self.components['stor'].capacity_max.reshape(-1, 1),
+                                         (1, self.n_steps))
+        # V2G
+        self.v2g_capital_cost = np.tile(self.components['evs'].capital_cost.reshape(-1, 1),
+                                        (1, self.n_steps))
+        self.v2g_capacity_max = np.tile(self.components['evs'].capacity_max.reshape(-1, 1),
+                                        (1, self.n_steps))
+        self.v2g_charge_cost = np.tile(self.components['evs'].cost_charge.reshape(-1, 1),
+                                       (1, self.n_steps))
+        self.v2g_discharge_cost = np.tile(self.components['evs'].cost_discharge.reshape(-1, 1),
+                                          (1, self.n_steps))
+
         # Create the variables for the optimization process
         self.decoded_lower_bounds, self.decoded_upper_bounds = self._create_variables()
 
@@ -205,33 +222,39 @@ class HMProblemScene(BaseScene):
                              x['loadCutActPower'] * self.components['loads'].cost_cut +
                              x['loadENS'] * self.components['loads'].cost_ens])
 
-        temp_stor: float = sum([self.components['stor'].capital_cost[s] *
-                                (x['storEnerState'][s, t] / self.components['stor'].capacity_max[s] - 0.63) ** 2 +
-                                x['storDchActPower'][s, t] * self.components['stor'].cost_discharge[s, t] +
-                                x['storChActPower'][s, t] * self.components['stor'].cost_charge[s, t] +
-                                6.5e-3 / self.components['stor'].capacity_max[s] * x['storChActPower'][
-                                    s, t] ** 2
-                                for t in t_range for s in stor_range])
+        # temp_stor: float = sum([self.components['stor'].capital_cost[s] *
+        #                       (x['storEnerState'][s, t] / self.components['stor'].capacity_max[s] - 0.63) ** 2 +
+        #                        x['storDchActPower'][s, t] * self.components['stor'].cost_discharge[s, t] +
+        #                        x['storChActPower'][s, t] * self.components['stor'].cost_charge[s, t] +
+        #                        6.5e-3 / self.components['stor'].capacity_max[s] * x['storChActPower'][
+        #                            s, t] ** 2
+        #                        for t in t_range for s in stor_range])
 
-        temp_v2g: float = sum([self.components['evs'].capital_cost[v] *
-                               (x['v2gEnerState'][v, t] / self.components['evs'].capacity_max[v] - 0.63) ** 2 +
-                               x['v2gDchActPower'][v, t] * self.components['evs'].cost_discharge[v] +
-                               x['v2gChActPower'][v, t] * self.components['evs'].cost_charge[v] +
-                               6.5e-3 / self.components['evs'].capacity_max[v] * x['v2gChActPower'][v, t] ** 2
-                               for t in t_range for v in v2g_range])
+        temp_stor: np.ndarray = np.sum([self.stor_capital_cost *
+                                       (x['storEnerState'] / self.stor_capacity_max - 0.63) ** 2 +
+                                       x['storDchActPower'] * self.components['stor'].cost_discharge +
+                                       x['storChActPower'] * self.components['stor'].cost_charge +
+                                       6.5e-3 / self.stor_capacity_max * x['storChActPower'] ** 2])
 
-        temp_rest: float = sum([x['pImp'][t] * self.components['pimp'].cost[t] +
-                                x['pExp'][t] * self.components['pexp'].cost[t]
-                                for t in t_range])
+        # temp_v2g: float = sum([self.components['evs'].capital_cost[v] *
+        #                       (x['v2gEnerState'][v, t] / self.components['evs'].capacity_max[v] - 0.63) ** 2 +
+        #                       x['v2gDchActPower'][v, t] * self.components['evs'].cost_discharge[v] +
+        #                       x['v2gChActPower'][v, t] * self.components['evs'].cost_charge[v] +
+        #                       6.5e-3 / self.components['evs'].capacity_max[v] * x['v2gChActPower'][v, t] ** 2
+        #                       for t in t_range for v in v2g_range])
 
-        # print the components of the objective function for debugging
-        #print('temp_gens: ', temp_gens)
-        #print('temp_loads: ', temp_loads)
-        #print('temp_stor: ', temp_stor)
-        #print('temp_v2g: ', temp_v2g)
-        #print('temp_rest: ', temp_rest)
-        #print('balance_penalty: ', balance_penalty)
-        #print('\n')
+        temp_v2g: np.ndarray = np.sum([self.v2g_capital_cost *
+                                       (x['v2gEnerState'] / self.v2g_capacity_max - 0.63) ** 2 +
+                                       x['v2gDchActPower'] * self.v2g_discharge_cost +
+                                       x['v2gChActPower'] * self.v2g_charge_cost +
+                                       6.5e-3 / self.v2g_capacity_max * x['v2gChActPower'] ** 2])
+
+        # temp_rest: float = sum([x['pImp'][t] * self.components['pimp'].cost[t] +
+        #                         x['pExp'][t] * self.components['pexp'].cost[t]
+        #                         for t in t_range])
+
+        temp_rest: np.ndarray = np.sum([x['pImp'] * self.components['pimp'].cost +
+                                       x['pExp'] * self.components['pexp'].cost])
 
         obj_fn = temp_gens + temp_loads + temp_stor + temp_v2g + temp_rest + balance_penalty
 

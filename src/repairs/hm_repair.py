@@ -21,8 +21,8 @@ class HMRepair(BaseRepair):
 
         self._initialize_values()
 
-        self.storCapCost = [0.05250, 0.10500, 0.01575]
-        self.v2gCapCost = [0.042, 0.063, 0.042, 0.042, 0.063]
+        self.storCapCost = self.components['stor'].capital_cost
+        self.v2gCapCost = self.components['evs'].capital_cost
 
         super().__init__()
 
@@ -90,11 +90,11 @@ class HMRepair(BaseRepair):
 
         # Generator types
         # Type 1 (non-renewable)
-        mask = self.components['gen'].is_renewable == np.ones(self.components['gen'].is_renewable.shape)
+        mask = self.components['gen'].is_renewable == 1
         x['genActPower'][mask] = (self.components['gen'].upper_bound * x['genXo'])[mask]
 
         # Type 2 (renewable)
-        mask = self.components['gen'].is_renewable == 2 * np.ones(self.components['gen'].is_renewable.shape)
+        mask = self.components['gen'].is_renewable == 2
         x['genExcActPower'][mask] = (self.components['gen'].upper_bound - x['genActPower'])[mask]
 
         # Clip again to make sure
@@ -221,7 +221,7 @@ class HMRepair(BaseRepair):
         # Fix the timestep dependencies
         for t in t_range:
             # Check if charging
-            mask = x['v2gChXo'][:, t] > np.zeros(x['v2gChXo'][:, t].shape)
+            # mask = x['v2gChXo'][:, t] > np.zeros(x['v2gChXo'][:, t].shape)
             charged = x['v2gChActPower'][:, t] * (1 - self.components['evs'].charge_efficiency)
 
             # Prevent over charging
@@ -231,7 +231,7 @@ class HMRepair(BaseRepair):
                                                         self.components['evs'].charge_efficiency)[secondary_mask]
 
             # Check if discharging
-            mask = x['v2gDchXo'][:, t] > np.zeros(x['v2gDchXo'][:, t].shape)
+            # mask = x['v2gDchXo'][:, t] > np.zeros(x['v2gDchXo'][:, t].shape)
             discharged = x['v2gDchActPower'][:, t] / self.components['evs'].discharge_efficiency
             secondary_mask = (x['v2gEnerState'][:, t - 1] - discharged) < 0
             x['v2gDchActPower'][:, t][secondary_mask] = (x['v2gEnerState'][:, t - 1] *
@@ -261,44 +261,22 @@ class HMRepair(BaseRepair):
 
     def check_balance(self, x):
 
-        # Create the iterators and ranges
-        t_range = range(self.n_steps)
-
-        g_range = range(self.n_gen)
-        balance_gens = np.zeros(self.n_steps)
-
-        l_range = range(self.n_load)
-        balance_loads = np.zeros(self.n_steps)
-
-        s_range = range(self.n_stor)
-        balance_stor = np.zeros(self.n_steps)
-
-        v_range = range(self.n_v2g)
-        balance_cs = np.zeros(self.n_steps)  # note: balance of the EVs is made through the charging station
-
         # Calculate the values over time
-        for t in t_range:
-            balance_gens[t] = np.sum([x['genActPower'][g, t] - x['genExcActPower'][g, t] for g in g_range])
-
-            balance_loads[t] = np.sum([x['loadRedActPower'][l, t] + \
-                                       x['loadCutActPower'][l, t] + \
-                                       x['loadENS'][l, t] + \
-                                       -self.components['loads'].upper_bound[l, t]
-                                       for l in l_range])
-
-            balance_stor[t] = np.sum([x['storDchActPower'][s, t] - x['storChActPower'][s, t] for s in s_range])
-
-            balance_cs[t] = np.sum([x['v2gDchActPower'][v, t] - x['v2gChActPower'][v, t] for v in v_range])
+        balance_gens = np.sum(x['genActPower'] - x['genExcActPower'], axis=0)
+        balance_loads = np.sum(x['loadRedActPower'] + x['loadCutActPower'] + x['loadENS'] -
+                               self.components['loads'].upper_bound, axis=0)
+        balance_stor = np.sum(x['storDchActPower'] - x['storChActPower'], axis=0)
+        balance_cs = np.sum(x['v2gDchActPower'] - x['v2gChActPower'], axis=0)
 
         balance_rest = balance_gens + balance_loads + balance_stor + balance_cs
 
         # Attribute penalties to import and exports to compensate the imbalance
         mask = balance_rest > 0
-        x['pImp'][mask] *= 0.0
+        x['pImp'][mask] = 0.0
         x['pExp'][mask] = balance_rest[mask]
 
         mask = balance_rest < 0
-        x['pExp'][mask] *= 0.0
+        x['pExp'][mask] = 0.0
         x['pImp'][mask] = abs(balance_rest)[mask]
 
         return

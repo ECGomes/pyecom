@@ -6,12 +6,13 @@ from .base_metaheuristic import BaseMetaheuristic
 import numpy as np
 import copy
 
+
 class HydeDF(BaseMetaheuristic):
 
     def __init__(self, n_iter: int, iter_tolerance: int, epsilon_tolerance: float,
                  pop_size: int, pop_dim: int,
                  lower_bound: np.ndarray, upper_bound: np.ndarray,
-                 f_weight: float, f_cr: float):
+                 f_weight: float, f_cr: float, keep_population: bool = False):
         super().__init__(n_iter=n_iter,
                          iter_tolerance=iter_tolerance,
                          epsilon_tolerance=epsilon_tolerance,
@@ -41,6 +42,9 @@ class HydeDF(BaseMetaheuristic):
         self.population_history = []
         self.population_history_fitness = []
 
+        # Flag to keep population history
+        self.keep_population = keep_population
+
         # Placeholder values for best population member and it's index
         self.current_best = None
         self.current_best_idx = None
@@ -69,13 +73,6 @@ class HydeDF(BaseMetaheuristic):
                                        self.pop_dim))
 
     def _update(self):
-        """
-        Population clip by lower and upper bounds
-        :param pop: Population received
-        :param lb: Population lower bound
-        :param ub: Population upper bound
-        :return: Clipped population
-        """
         return np.clip(self.population, self.lower_bound, self.upper_bound)
 
     def _initial_check(self):
@@ -153,7 +150,7 @@ class HydeDF(BaseMetaheuristic):
         new_population = self.population_old * pop_mutated + new_population * pop_mutated_inverse
 
         self.population = new_population
-        self.population_history.append(self.population)
+        # self.population_history.append(self.population)
 
         return
 
@@ -221,6 +218,9 @@ class HydeDF(BaseMetaheuristic):
         # Update HyDE-DF values
         self._update_hyde_params()
 
+        # Pre-update cleanup
+        self.pre_update_cleanup()
+
         # Operator
         self._operator()
 
@@ -237,15 +237,20 @@ class HydeDF(BaseMetaheuristic):
 
         return
 
-    def post_update_cleanup(self):
-
-        # Elitism selection
-        self.selection_mechanism()
+    def pre_update_cleanup(self):
 
         # Handle the history
         self.population_old = copy.deepcopy(self.population)
         self.population_old_fitness = copy.deepcopy(self.population_fitness)
-        self.population_history.append(self.population)
+
+        # Save to history
+        if self.keep_population:
+            self.population_history.append(self.population)
+
+    def post_update_cleanup(self):
+
+        # Elitism selection
+        self.selection_mechanism()
 
         # Update best member
         self.get_best()
