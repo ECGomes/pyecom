@@ -37,7 +37,9 @@ class HMProblemPymoo(Problem):
         # Provided in utils/battery/parameter_calculation.py
         # Each element of the list is for a different battery
         self.storCapCost = [0.05250, 0.10500, 0.01575]
+        self.storCapCost = np.tile(self.storCapCost, self.n_stor)
         self.v2gCapCost = [0.042, 0.063, 0.042, 0.042, 0.063]
+        self.v2gCapCost = np.tile(self.v2gCapCost, self.n_v2g)
 
         # Placeholder for the objective function
         self.objFn = 0.0

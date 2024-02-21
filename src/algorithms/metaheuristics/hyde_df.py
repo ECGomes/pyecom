@@ -4,6 +4,7 @@ import copy
 from .base_metaheuristic import BaseMetaheuristic
 
 import numpy as np
+import copy
 
 
 class HydeDF(BaseMetaheuristic):
@@ -11,7 +12,7 @@ class HydeDF(BaseMetaheuristic):
     def __init__(self, n_iter: int, iter_tolerance: int, epsilon_tolerance: float,
                  pop_size: int, pop_dim: int,
                  lower_bound: np.ndarray, upper_bound: np.ndarray,
-                 f_weight: float, f_cr: float):
+                 f_weight: float, f_cr: float, keep_population: bool = False):
         super().__init__(n_iter=n_iter,
                          iter_tolerance=iter_tolerance,
                          epsilon_tolerance=epsilon_tolerance,
@@ -33,13 +34,16 @@ class HydeDF(BaseMetaheuristic):
 
         # Placeholder values for population and population history
         self.population = []
-        self.population_fitness = [0.0 for _ in np.arange(self.pop_size)]
+        self.population_fitness = [np.inf for _ in range(self.pop_size)]
 
         self.population_old = []
-        self.population_old_fitness = [0.0 for _ in np.arange(self.pop_size)]
+        self.population_old_fitness = [np.inf for _ in range(self.pop_size)]
 
         self.population_history = []
         self.population_history_fitness = []
+
+        # Flag to keep population history
+        self.keep_population = keep_population
 
         # Placeholder values for best population member and it's index
         self.current_best = None
@@ -69,13 +73,6 @@ class HydeDF(BaseMetaheuristic):
                                        self.pop_dim))
 
     def _update(self):
-        """
-        Population clip by lower and upper bounds
-        :param pop: Population received
-        :param lb: Population lower bound
-        :param ub: Population upper bound
-        :return: Clipped population
-        """
         return np.clip(self.population, self.lower_bound, self.upper_bound)
 
     def _initial_check(self):
@@ -142,18 +139,18 @@ class HydeDF(BaseMetaheuristic):
                                     (1, self.pop_dim)),
                             (self.f_weight.shape[0], self.pop_dim))
 
-        diff_var = pop_02 + np.random.uniform(size=(self.pop_size, self.pop_dim)) - self.population_old
-        diff_var = diff_var * pop_01 * population_best_member * exp_decrease
+        diff_var = population_best_member * (pop_02 + np.random.uniform(size=(self.pop_size, self.pop_dim)))
+        diff_var = (diff_var - self.population_old) * pop_01 * exp_decrease
 
         # Prevent overflow
         diff_var = np.clip(diff_var, -1e+10, 1e+10)
 
         # Population update
-        new_population = self.population_old + pop_00 * (pop_rot01 - pop_rot02) + diff_var
+        new_population = self.population_old + pop_00 * (np.array(pop_rot01) - np.array(pop_rot02)) + diff_var
         new_population = self.population_old * pop_mutated + new_population * pop_mutated_inverse
 
         self.population = new_population
-        self.population_history.append(self.population)
+        # self.population_history.append(self.population)
 
         return
 
@@ -186,10 +183,10 @@ class HydeDF(BaseMetaheuristic):
 
         # Set the placeholder variables to empty lists
         self.population = []
-        self.population_fitness = [0.0 for _ in range(self.pop_size)]
+        self.population_fitness = [np.inf for _ in range(self.pop_size)]
 
         self.population_old = []
-        self.population_old_fitness = [0.0 for _ in range(self.pop_size)]
+        self.population_old_fitness = [np.inf for _ in range(self.pop_size)]
 
         self.population_history = []
         self.population_history_fitness = []
@@ -221,6 +218,9 @@ class HydeDF(BaseMetaheuristic):
         # Update HyDE-DF values
         self._update_hyde_params()
 
+        # Pre-update cleanup
+        self.pre_update_cleanup()
+
         # Operator
         self._operator()
 
@@ -229,21 +229,28 @@ class HydeDF(BaseMetaheuristic):
     # Elitism selection
     def selection_mechanism(self):
 
-        # Get the indexes of best members from the previous population to preserve them
-        mask = self.population_old_fitness < self.population_fitness
-
-        # Preserve the old members
-        self.population[mask, :] = self.population_old[mask, :]
-        self.population_fitness[mask] = self.population_old_fitness[mask]
+        # Keep the best members
+        for i in range(self.pop_size):
+            if self.population_old_fitness[i] < self.population_fitness[i]:
+                self.population[i, :] = self.population_old[i, :]
+                self.population_fitness[i] = self.population_old_fitness[i]
 
         return
 
-    def post_update_cleanup(self):
+    def pre_update_cleanup(self):
 
         # Handle the history
-        self.population_old = self.population
-        self.population_old_fitness = self.population_fitness
-        self.population_history.append(self.population)
+        self.population_old = copy.deepcopy(self.population)
+        self.population_old_fitness = copy.deepcopy(self.population_fitness)
+
+        # Save to history
+        if self.keep_population:
+            self.population_history.append(self.population)
+
+    def post_update_cleanup(self):
+
+        # Elitism selection
+        self.selection_mechanism()
 
         # Update best member
         self.get_best()

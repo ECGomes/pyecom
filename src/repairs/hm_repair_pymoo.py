@@ -79,8 +79,13 @@ class HMRepairPymoo(Repair):
         x['genActPower'][mask] = (self.components.generator['p_forecast'] * x['genXo'])[mask]
 
         # Type 2 (renewable)
-        mask = self.components.generator['type_generator'] == 2 * np.ones(self.components.generator['type_generator'].shape)
+        mask = self.components.generator['type_generator'] == 2 * \
+               np.ones(self.components.generator['type_generator'].shape)
         x['genExcActPower'][mask] = (self.components.generator['p_forecast'] - x['genActPower'])[mask]
+
+        x['genExcActPower'] = np.clip(x['genExcActPower'], np.zeros(x['genActPower'].shape),
+                                      (np.ones(x['genActPower'].shape).transpose() * self.components.generator[
+                                          'p_max']).transpose())
         return
 
     def check_loads(self, x):
@@ -102,6 +107,8 @@ class HMRepairPymoo(Repair):
         # Assign the binary variables
         x['storDchXo'] = (x['storDchXo'] > 0.5).astype(int)
         x['storChXo'] = (x['storChXo'] > 0.5).astype(int)
+
+        x['storDchXo'] = x['storDchXo'] * (1 - x['storChXo'])
 
         # Value clipping
         x['storDchActPower'] = np.clip(x['storDchActPower'], np.zeros(x['storDchActPower'].shape),
@@ -155,6 +162,13 @@ class HMRepairPymoo(Repair):
                                              self.components.storage['energy_min_percentage'][mask] - \
                                              x['EminRelaxStor'][:, t][mask]
 
+        x['storDchActPower'] = np.clip(x['storDchActPower'], np.zeros(x['storDchActPower'].shape),
+                                       (np.ones(x['storDchActPower'].shape).transpose() * \
+                                        self.components.storage['p_discharge_max']).transpose())
+        x['storChActPower'] = np.clip(x['storChActPower'], np.zeros(x['storChActPower'].shape),
+                                      (np.ones(x['storChActPower'].shape).transpose() * self.components.storage[
+                                          'p_charge_max']).transpose())
+
         return
 
     def check_v2g(self, x):
@@ -166,6 +180,8 @@ class HMRepairPymoo(Repair):
         # Bound binaries
         x['v2gDchXo'] = (x['v2gDchXo'] > 0.5).astype(int)
         x['v2gChXo'] = (x['v2gChXo'] > 0.5).astype(int)
+
+        x['v2gDchXo'] = x['v2gDchXo'] * (1 - x['v2gChXo'])
 
         # Preallocate range
         t_range = range(1, self.n_steps)
@@ -211,6 +227,10 @@ class HMRepairPymoo(Repair):
             x['v2gEnerState'][:, t][mask] = self.components.vehicle['e_capacity_max'][mask] * \
                                             self.components.vehicle['min_technical_soc'][mask] - \
                                             x['EminRelaxEV'][:, t][mask]
+
+        # Clip the values of discharging and charging to the maximum allowed
+        x['v2gDchActPower'] = np.clip(x['v2gDchActPower'], 0, self.components.vehicle['schedule_discharge'])
+        x['v2gChActPower'] = np.clip(x['v2gChActPower'], 0, self.components.vehicle['schedule_charge'])
 
     def check_balance(self, x):
 

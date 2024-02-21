@@ -160,5 +160,6 @@ cython_debug/
 .idea/
 
 # Local notebooks used for testing
-/notebooks
+/notebooks/old/
+/notebooks/unit_tests/
 

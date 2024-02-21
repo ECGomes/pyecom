@@ -9,10 +9,10 @@ class BaseScene:
     def initialize(self):
         raise NotImplementedError
 
-    def evaluate(self):
+    def evaluate(self, x):
         raise NotImplementedError
 
-    def repair(self):
+    def repair(self, x):
         raise NotImplementedError
 
     def run(self):

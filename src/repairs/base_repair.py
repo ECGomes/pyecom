@@ -4,5 +4,5 @@ class BaseRepair:
     def __init__(self):
         pass
 
-    def repair(self):
+    def repair(self, x):
         raise NotImplementedError

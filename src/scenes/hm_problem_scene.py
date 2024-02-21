@@ -30,6 +30,23 @@ class HMProblemScene(BaseScene):
         self.n_stor = self.components['stor'].value.shape[0]
         self.n_v2g = self.components['evs'].value.shape[0]
 
+        # Cache the variables that should be expanded into matrices
+        # This is a quick fix for the problem of having to expand the variables and increase speed
+        # Storage
+        self.stor_capital_cost = np.tile(self.components['stor'].capital_cost.reshape(-1, 1),
+                                         (1, self.n_steps))
+        self.stor_capacity_max = np.tile(self.components['stor'].capacity_max.reshape(-1, 1),
+                                         (1, self.n_steps))
+        # V2G
+        self.v2g_capital_cost = np.tile(self.components['evs'].capital_cost.reshape(-1, 1),
+                                        (1, self.n_steps))
+        self.v2g_capacity_max = np.tile(self.components['evs'].capacity_max.reshape(-1, 1),
+                                        (1, self.n_steps))
+        self.v2g_charge_cost = np.tile(self.components['evs'].cost_charge.reshape(-1, 1),
+                                       (1, self.n_steps))
+        self.v2g_discharge_cost = np.tile(self.components['evs'].cost_discharge.reshape(-1, 1),
+                                          (1, self.n_steps))
+
         # Create the variables for the optimization process
         self.decoded_lower_bounds, self.decoded_upper_bounds = self._create_variables()
 
@@ -205,24 +222,39 @@ class HMProblemScene(BaseScene):
                              x['loadCutActPower'] * self.components['loads'].cost_cut +
                              x['loadENS'] * self.components['loads'].cost_ens])
 
-        temp_stor: float = sum([self.components['stor'].capital_cost[s] *
-                                (x['storEnerState'][s, t] / self.components['stor'].capacity_max[s] - 0.63) ** 2 +
-                                x['storDchActPower'][s, t] * self.components['stor'].cost_discharge[s, t] +
-                                x['storChActPower'][s, t] * self.components['stor'].cost_charge[s, t] +
-                                6.5e-3 / self.components['stor'].capacity_max[s] * x['storChActPower'][
-                                    s, t] ** 2
-                                for t in t_range for s in stor_range])
+        # temp_stor: float = sum([self.components['stor'].capital_cost[s] *
+        #                       (x['storEnerState'][s, t] / self.components['stor'].capacity_max[s] - 0.63) ** 2 +
+        #                        x['storDchActPower'][s, t] * self.components['stor'].cost_discharge[s, t] +
+        #                        x['storChActPower'][s, t] * self.components['stor'].cost_charge[s, t] +
+        #                        6.5e-3 / self.components['stor'].capacity_max[s] * x['storChActPower'][
+        #                            s, t] ** 2
+        #                        for t in t_range for s in stor_range])
 
-        temp_v2g: float = sum([self.components['evs'].capital_cost[v] *
-                               (x['v2gEnerState'][v, t] / self.components['evs'].capacity_max[v] - 0.63) ** 2 +
-                               x['v2gDchActPower'][v, t] * self.components['evs'].cost_discharge[v] +
-                               x['v2gChActPower'][v, t] * self.components['evs'].cost_charge[v] +
-                               6.5e-3 / self.components['evs'].capacity_max[v] * x['v2gChActPower'][v, t] ** 2
-                               for t in t_range for v in v2g_range])
+        temp_stor: np.ndarray = np.sum([self.stor_capital_cost *
+                                       (x['storEnerState'] / self.stor_capacity_max - 0.63) ** 2 +
+                                       x['storDchActPower'] * self.components['stor'].cost_discharge +
+                                       x['storChActPower'] * self.components['stor'].cost_charge +
+                                       6.5e-3 / self.stor_capacity_max * x['storChActPower'] ** 2])
 
-        temp_rest: float = sum([x['pImp'][t] * self.components['pimp'].cost[t] +
-                                x['pExp'][t] * self.components['pexp'].cost[t]
-                                for t in t_range])
+        # temp_v2g: float = sum([self.components['evs'].capital_cost[v] *
+        #                       (x['v2gEnerState'][v, t] / self.components['evs'].capacity_max[v] - 0.63) ** 2 +
+        #                       x['v2gDchActPower'][v, t] * self.components['evs'].cost_discharge[v] +
+        #                       x['v2gChActPower'][v, t] * self.components['evs'].cost_charge[v] +
+        #                       6.5e-3 / self.components['evs'].capacity_max[v] * x['v2gChActPower'][v, t] ** 2
+        #                       for t in t_range for v in v2g_range])
+
+        temp_v2g: np.ndarray = np.sum([self.v2g_capital_cost *
+                                       (x['v2gEnerState'] / self.v2g_capacity_max - 0.63) ** 2 +
+                                       x['v2gDchActPower'] * self.v2g_discharge_cost +
+                                       x['v2gChActPower'] * self.v2g_charge_cost +
+                                       6.5e-3 / self.v2g_capacity_max * x['v2gChActPower'] ** 2])
+
+        # temp_rest: float = sum([x['pImp'][t] * self.components['pimp'].cost[t] +
+        #                         x['pExp'][t] * self.components['pexp'].cost[t]
+        #                         for t in t_range])
+
+        temp_rest: np.ndarray = np.sum([x['pImp'] * self.components['pimp'].cost +
+                                       x['pExp'] * self.components['pexp'].cost])
 
         obj_fn = temp_gens + temp_loads + temp_stor + temp_v2g + temp_rest + balance_penalty
 
@@ -241,15 +273,22 @@ class HMProblemScene(BaseScene):
 
         # Evaluate the initial population
         # Requires a decoding and initial fix
+        current_pop_fitness = []
         for member_idx in np.arange(self.algo.population.shape[0]):
             member = self.decode(self.algo.population[member_idx])
             member = self.repair(member)
             member_fitness = self.evaluate(member)
 
             # Update the population fitness
-            self.objective_function_val.append(member_fitness)
+            current_pop_fitness.append(member_fitness)
             self.algo.population[member_idx] = self.encode(member)
             self.algo.population_fitness[member_idx] = member_fitness
+
+            # Since it's the first iteration, the old population is the same as the new population
+            self.algo.population_old = self.algo.population
+            self.algo.population_old_fitness = self.algo.population_fitness
+            self.algo.population_history.append(self.algo.population)
+        self.objective_function_val.append(current_pop_fitness)
 
         # Update the best fitness
         self.current_best_fitness = np.min(self.algo.population_fitness)
@@ -260,6 +299,7 @@ class HMProblemScene(BaseScene):
         self.algo.current_best_idx = self.current_best_idx
         self.algo.current_best = self.encode(self.current_best)
 
+        # Main loop
         for i in tqdm.tqdm(np.arange(self.algo.n_iter)):
 
             # Update algorithm iteration count
@@ -269,15 +309,17 @@ class HMProblemScene(BaseScene):
             self.algo.update_population()
 
             # Repair the new population
+            current_pop_fitness = []
             for member_idx in np.arange(self.algo.population.shape[0]):
                 member = self.decode(self.algo.population[member_idx])
                 member = self.repair(member)
                 member_fitness = self.evaluate(member)
 
                 # Update the population member and its fitness
-                self.objective_function_val.append(member_fitness)
+                current_pop_fitness.append(member_fitness)
                 self.algo.population[member_idx] = self.encode(member)
                 self.algo.population_fitness[member_idx] = member_fitness
+            self.objective_function_val.append(current_pop_fitness)
 
             # Update the best fitness
             self.current_best_fitness = np.min(self.algo.population_fitness)
@@ -287,9 +329,6 @@ class HMProblemScene(BaseScene):
             self.algo.current_best_fitness = self.current_best_fitness
             self.algo.current_best_idx = self.current_best_idx
             self.algo.current_best = self.encode(self.current_best)
-
-            # Elite selection
-            self.algo.selection_mechanism()
 
             # Update remaining parameters and history
             self.algo.post_update_cleanup()

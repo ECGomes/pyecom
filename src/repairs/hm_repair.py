@@ -21,8 +21,8 @@ class HMRepair(BaseRepair):
 
         self._initialize_values()
 
-        self.storCapCost = [0.05250, 0.10500, 0.01575]
-        self.v2gCapCost = [0.042, 0.063, 0.042, 0.042, 0.063]
+        self.storCapCost = self.components['stor'].capital_cost
+        self.v2gCapCost = self.components['evs'].capital_cost
 
         super().__init__()
 
@@ -68,6 +68,9 @@ class HMRepair(BaseRepair):
         return
 
     def check_generators(self, x):
+        # Binary variable
+        x['genXo'] = (x['genXo'] > 0.5).astype(int)
+
         # Clip the values
         x['genActPower'] = np.clip(x['genActPower'], np.zeros(x['genActPower'].shape),
                                    self.components['gen'].upper_bound)
@@ -87,12 +90,18 @@ class HMRepair(BaseRepair):
 
         # Generator types
         # Type 1 (non-renewable)
-        mask = self.components['gen'].is_renewable == np.ones(self.components['gen'].is_renewable.shape)
+        mask = self.components['gen'].is_renewable == 1
         x['genActPower'][mask] = (self.components['gen'].upper_bound * x['genXo'])[mask]
 
         # Type 2 (renewable)
-        mask = self.components['gen'].is_renewable == 2 * np.ones(self.components['gen'].is_renewable.shape)
+        mask = self.components['gen'].is_renewable == 2
         x['genExcActPower'][mask] = (self.components['gen'].upper_bound - x['genActPower'])[mask]
+
+        # Clip again to make sure
+        x['genActPower'] = np.clip(x['genActPower'], np.zeros(x['genActPower'].shape),
+                                   self.components['gen'].upper_bound)
+        x['genExcActPower'] = np.clip(x['genExcActPower'], np.zeros(x['genExcActPower'].shape),
+                                      self.components['gen'].upper_bound)
         return
 
     def check_loads(self, x):
@@ -115,11 +124,23 @@ class HMRepair(BaseRepair):
         x['storDchXo'] = (x['storDchXo'] > 0.5).astype(int)
         x['storChXo'] = (x['storChXo'] > 0.5).astype(int)
 
+        # Mutual exclusion
+        x['storDchXo'] = x['storDchXo'] * (1 - x['storChXo'])
+
         # Value clipping
         x['storDchActPower'] = np.clip(x['storDchActPower'], np.zeros(x['storDchActPower'].shape),
                                        self.components['stor'].discharge_max)
         x['storChActPower'] = np.clip(x['storChActPower'], np.zeros(x['storChActPower'].shape),
                                       self.components['stor'].charge_max)
+
+        # Clip the energy state to the maximum allowed
+        x['storEnerState'] = np.clip(x['storEnerState'], np.zeros(x['storEnerState'].shape),
+                                     (np.ones(x['storEnerState'].shape).transpose() *
+                                      self.components['stor'].capacity_max).transpose())
+
+        x['EminRelaxStor'] = np.clip(x['storEnerState'], np.zeros(x['storEnerState'].shape),
+                                     (np.ones(x['storEnerState'].shape).transpose() *
+                                      self.components['stor'].capacity_max).transpose())
 
         # Initial state of charge
         x['storEnerState'][:, 0] = self.components['stor'].capacity_max * self.components['stor'].initial_charge + \
@@ -133,8 +154,8 @@ class HMRepair(BaseRepair):
         # Fix the timestep dependencies
         for t in t_range:
             # Check if charging
-            mask = x['storChXo'][:, t] > np.zeros(x['storChXo'][:, t].shape)
-            charged = x['storChActPower'][:, t] * (1 - self.components['stor'].charge_efficiency)
+            charged = x['storChXo'][:, t] * x['storChActPower'][:, t] * \
+                      (1 - self.components['stor'].charge_efficiency)
 
             # Prevent over charging
             secondary_mask = (x['storEnerState'][:, t - 1] + charged) > self.components['stor'].capacity_max
@@ -143,16 +164,13 @@ class HMRepair(BaseRepair):
                  self.components['stor'].charge_efficiency)[secondary_mask]
 
             # Check if discharging
-            mask = x['storDchXo'][:, t] > np.zeros(x['storDchXo'][:, t].shape)
-            discharged = x['storDchActPower'][:, t] / self.components['stor'].discharge_efficiency
+            discharged = x['storDchXo'][:, t] * x['storDchActPower'][:, t] \
+                         / self.components['stor'].discharge_efficiency
             secondary_mask = (x['storEnerState'][:, t - 1] - discharged) < 0
             x['storDchActPower'][:, t][secondary_mask] = (x['storEnerState'][:, t - 1] *
                                                           self.components['stor'].discharge_efficiency)[secondary_mask]
 
             # Update the energy state
-            x['storChActPower'][:, t] *= x['storChXo'][:, t]
-            x['storDchActPower'][:, t] *= x['storDchXo'][:, t]
-
             x['storEnerState'][:, t] = x['storEnerState'][:, t - 1] + x['storChActPower'][:, t] * \
                                        self.components['stor'].charge_efficiency - \
                                        x['storDchActPower'][:, t] / self.components['stor'].discharge_efficiency
@@ -163,6 +181,17 @@ class HMRepair(BaseRepair):
             x['storEnerState'][:, t][mask] = self.components['stor'].capacity_max[mask] * \
                                              self.components['stor'].capacity_min[mask] - \
                                              x['EminRelaxStor'][:, t][mask]
+
+        # Clip the values of discharging and charging to the maximum allowed
+        x['storDchActPower'] = np.clip(x['storDchActPower'], np.zeros(x['storDchActPower'].shape),
+                                       self.components['stor'].discharge_max)
+        x['storChActPower'] = np.clip(x['storChActPower'], np.zeros(x['storChActPower'].shape),
+                                      self.components['stor'].charge_max)
+
+        # Clip the energy state to the maximum allowed
+        x['storEnerState'] = np.clip(x['storEnerState'], np.zeros(x['storEnerState'].shape),
+                                     (np.ones(x['storEnerState'].shape).transpose() *
+                                      self.components['stor'].capacity_max).transpose())
 
         return
 
@@ -175,6 +204,9 @@ class HMRepair(BaseRepair):
         # Bound binaries
         x['v2gDchXo'] = (x['v2gDchXo'] > 0.5).astype(int)
         x['v2gChXo'] = (x['v2gChXo'] > 0.5).astype(int)
+
+        # Mutually exclusive
+        x['v2gDchXo'] = x['v2gDchXo'] * (1 - x['v2gChXo'])
 
         # Preallocate range
         t_range = range(1, self.n_steps)
@@ -189,17 +221,17 @@ class HMRepair(BaseRepair):
         # Fix the timestep dependencies
         for t in t_range:
             # Check if charging
-            mask = x['v2gChXo'][:, t] > np.zeros(x['v2gChXo'][:, t].shape)
+            # mask = x['v2gChXo'][:, t] > np.zeros(x['v2gChXo'][:, t].shape)
             charged = x['v2gChActPower'][:, t] * (1 - self.components['evs'].charge_efficiency)
 
             # Prevent over charging
             secondary_mask = (x['v2gEnerState'][:, t - 1] + charged) > self.components['evs'].capacity_max
-            x['v2gChActPower'][:, t][secondary_mask] = ((self.components['evs'].capacity_max - \
-                                                         x['v2gEnerState'][:, t - 1]) / \
-                                                        (self.components['evs'].charge_efficiency))[secondary_mask]
+            x['v2gChActPower'][:, t][secondary_mask] = ((self.components['evs'].capacity_max -
+                                                         x['v2gEnerState'][:, t - 1]) /
+                                                        self.components['evs'].charge_efficiency)[secondary_mask]
 
             # Check if discharging
-            mask = x['v2gDchXo'][:, t] > np.zeros(x['v2gDchXo'][:, t].shape)
+            # mask = x['v2gDchXo'][:, t] > np.zeros(x['v2gDchXo'][:, t].shape)
             discharged = x['v2gDchActPower'][:, t] / self.components['evs'].discharge_efficiency
             secondary_mask = (x['v2gEnerState'][:, t - 1] - discharged) < 0
             x['v2gDchActPower'][:, t][secondary_mask] = (x['v2gEnerState'][:, t - 1] *
@@ -215,53 +247,36 @@ class HMRepair(BaseRepair):
                                       x['v2gDchActPower'][:, t] / self.components['evs'].discharge_efficiency
 
             # Check minimum energy state
-            mask = x['v2gEnerState'][:, t] < self.components['evs'].capacity_max * \
-                   self.components['evs'].min_charge - \
+            mask = x['v2gEnerState'][:, t] < self.components['evs'].capacity_max * self.components['evs'].min_charge - \
                    x['EminRelaxEV'][:, t]
             x['v2gEnerState'][:, t][mask] = self.components['evs'].capacity_max[mask] * \
                                             self.components['evs'].min_charge[mask] - \
                                             x['EminRelaxEV'][:, t][mask]
 
+        # Clip the values of discharging and charging to the maximum allowed
+        x['v2gDchActPower'] = np.clip(x['v2gDchActPower'], np.zeros(x['v2gDchActPower'].shape),
+                                      self.components['evs'].schedule_discharge)
+        x['v2gChActPower'] = np.clip(x['v2gChActPower'], np.zeros(x['v2gChActPower'].shape),
+                                     self.components['evs'].schedule_charge)
+
     def check_balance(self, x):
 
-        # Create the iterators and ranges
-        t_range = range(self.n_steps)
-
-        g_range = range(self.n_gen)
-        balance_gens = np.zeros(self.n_steps)
-
-        l_range = range(self.n_load)
-        balance_loads = np.zeros(self.n_steps)
-
-        s_range = range(self.n_stor)
-        balance_stor = np.zeros(self.n_steps)
-
-        v_range = range(self.n_v2g)
-        balance_cs = np.zeros(self.n_steps)  # note: balance of the EVs is made through the charging station
-
         # Calculate the values over time
-        for t in t_range:
-            balance_gens[t] = np.sum([x['genActPower'][g, t] - x['genExcActPower'][g, t] for g in g_range])
-
-            balance_loads[t] = np.sum([x['loadRedActPower'][l, t] + \
-                                       x['loadCutActPower'][l, t] + \
-                                       x['loadENS'][l, t] + \
-                                       -self.components['loads'].upper_bound[l, t]
-                                       for l in l_range])
-
-            balance_stor[t] = np.sum([x['storDchActPower'][s, t] - x['storChActPower'][s, t] for s in s_range])
-
-            balance_cs[t] = np.sum([x['v2gDchActPower'][v, t] - x['v2gChActPower'][v, t] for v in v_range])
+        balance_gens = np.sum(x['genActPower'] - x['genExcActPower'], axis=0)
+        balance_loads = np.sum(x['loadRedActPower'] + x['loadCutActPower'] + x['loadENS'] -
+                               self.components['loads'].upper_bound, axis=0)
+        balance_stor = np.sum(x['storDchActPower'] - x['storChActPower'], axis=0)
+        balance_cs = np.sum(x['v2gDchActPower'] - x['v2gChActPower'], axis=0)
 
         balance_rest = balance_gens + balance_loads + balance_stor + balance_cs
 
         # Attribute penalties to import and exports to compensate the imbalance
         mask = balance_rest > 0
-        x['pImp'][mask] *= 0.0
+        x['pImp'][mask] = 0.0
         x['pExp'][mask] = balance_rest[mask]
 
         mask = balance_rest < 0
-        x['pExp'][mask] *= 0.0
+        x['pExp'][mask] = 0.0
         x['pImp'][mask] = abs(balance_rest)[mask]
 
         return
