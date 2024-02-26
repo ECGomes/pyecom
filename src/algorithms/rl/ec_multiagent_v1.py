@@ -3,7 +3,7 @@ import numpy as np
 import random
 from copy import copy, deepcopy
 from collections import OrderedDict
-from ...resources.base_resource import BaseResource
+from src.resources.base_resource import BaseResource
 
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
 
