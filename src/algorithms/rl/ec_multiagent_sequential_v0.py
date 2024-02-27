@@ -69,11 +69,26 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         self.terminateds = set()
         self.truncateds = set()
 
+        # Index of executed agents, to be used in the step function
+        self._agent_sequence = [resource.name for resource in self.generators] + \
+                               [resource.name for resource in self.evs] + \
+                               [resource.name for resource in self.storages] + \
+                               ['aggregator']
+        self._executed_agent: int = 0
+        self._current_agent = self._agent_sequence[self._executed_agent]
+
         # Observation space
         self._handle_observation_space()
 
         # Action space
         self._handle_action_space()
+
+        # Costs for each resource
+        self.accumulated_generator_cost: float = 0.0
+        self.accumulated_storage_cost: float = 0.0
+        self.accumulated_ev_cost: float = 0.0
+        self.accumulated_import_cost: float = 0.0
+        self.accumulated_export_cost: float = 0.0
 
         # Penalties
         self.storage_action_penalty = storage_action_penalty
@@ -81,6 +96,13 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         self.ev_requirement_penalty = ev_requirement_penalty
         self.import_penalty = import_penalty
         self.export_penalty = export_penalty
+
+        # Set a penalty for each resource
+        self.accumulated_generator_penalty: float = 0.0
+        self.accumulated_storage_penalty: float = 0.0
+        self.accumulated_ev_penalty: float = 0.0
+        self.accumulated_import_penalty: float = 0.0
+        self.accumulated_export_penalty: float = 0.0
 
     # Create agents
     def __create_agents__(self) -> dict:
@@ -119,7 +141,7 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
             temp_observation_space[ev] = evs[ev]
 
         # Aggregator observation space
-        temp_observation_space['agg'] = self.__create_agg_observations__()
+        temp_observation_space['agg'] = self.__create_aggregator_observations__()
 
         # Set the observation space
         self.observation_space = gym.spaces.Dict(temp_observation_space)
@@ -227,19 +249,30 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         return generator_actions
 
     # Execute generator actions
-    def __execute_generator_actions__(self, gen, actions) -> None:
+    def __execute_generator_actions__(self, gen, actions) -> float:
         """
         Execute the actions for the generators
         :param gen: generator resource
         :param actions: actions to be executed
-        :return: None
+        :return: float
         """
+
+        produced_energy: float = 0.0
 
         # Check if actions has active or production
         if 'active' in actions.keys():
-            gen.value = actions['active'] * max(gen.upper_bound)
+            produced_energy = (actions['active'] *
+                               max(gen.upper_bound[self.current_timestep]))
         elif 'production' in actions.keys():
-            gen.value = actions['production'][0] * max(gen.upper_bound)
+            produced_energy = (actions['production'][0] *
+                               max(gen.upper_bound[self.current_timestep]))
+
+        # Attribute the produced energy to the generator
+        gen.value[self.current_timestep] = produced_energy
+        self.current_production += gen.value[self.current_timestep]
+        self.current_available_energy += gen.value[self.current_timestep]
+
+        return 0.0
 
     # Create Storage Observation Space
     def __create_storage_observations__(self) -> dict:
@@ -310,7 +343,7 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         return storage_actions
 
     # Execute storage actions
-    def __execute_storage_actions__(self, storage, actions) -> float:
+    def __execute_storage_actions__(self, storage, actions) -> tuple[float, float]:
         """
         Execute the actions for the storages
         :param storage: storage resource
@@ -318,16 +351,19 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         :return: reward to be used as penalty
         """
 
-        # Set up the reward to be returned in case of illegal storage actions
+        # Calculate the cost of the storage
+        cost: float = 0.0
+
+        # Set up the penalty to be returned in case of illegal storage actions
         # Such as overcharging or discharging beyond the available energy.
         # The reward will be the deviation from the bounds, to be later used as a penalty
-        reward: float = 0.0
+        penalty: float = 0.0
 
         # Idle state
         if actions['ctl'] == 0:
             storage.charge = 0.0
             storage.discharge = 0.0
-            reward = 0.0
+            penalty = 0.0
 
         # Charge state
         elif actions['ctl'] == 1:
@@ -336,7 +372,21 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
                 # Calculate the deviation from the bounds
                 deviation = storage.value + charge - 1.0
                 charge = 1.0 - storage.value
-                reward = deviation
+                penalty = deviation
+
+            if self.current_available_energy < charge:
+                # Calculate if there is any remaining energy
+                deviation = charge - self.current_available_energy
+
+                # Get the cost of additional energy
+                cost = (charge *
+                        storage.cost_charge[self.current_timestep] +
+                        deviation *
+                        self.imports[0].cost[self.current_timestep])
+
+            else:
+                # Get the cost of the energy
+                cost = charge * storage.cost_charge[self.current_timestep]
 
             storage.charge = charge
             storage.discharge = 0.0
@@ -348,12 +398,18 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
                 # Calculate the deviation from the bounds
                 deviation = abs(storage.value - discharge)
                 discharge = storage.value
-                reward = deviation
+                penalty = deviation
 
             storage.charge = 0.0
             storage.discharge = discharge
 
-        return reward
+            # Add the energy to the pool
+            self.current_available_energy += discharge
+
+            # Get the cost of the energy
+            cost = discharge * storage.cost_discharge[self.current_timestep]
+
+        return cost, penalty
 
     # Create EV Observation Space
     def __create_ev_observations__(self) -> dict:
@@ -457,6 +513,55 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         :return: reward to be used as penalty
         """
 
+        # Set up the reward to be returned in case of illegal EV actions
+        # Such as overcharging or discharging beyond the available energy.
+        # The reward will be the deviation from the bounds, to be later used as a penalty
+        # Also includes the penalty for not meeting the energy requirement for the next departure
+        reward: float = 0.0
+
+        # Idle state
+        if actions['ctl'] == 0:
+            ev.charge = 0.0
+            ev.discharge = 0.0
+            reward = 0.0
+
+        # Charge state
+        elif actions['ctl'] == 1:
+            charge = actions['value'][0]
+            if ev.value + charge > 1.0:
+                # Calculate the deviation from the bounds
+                deviation = ev.value + charge - 1.0
+                charge = 1.0 - ev.value
+                reward = deviation
+
+            ev.charge = charge
+            ev.discharge = 0.0
+
+        # Discharge state
+        elif actions['ctl'] == 2:
+            discharge = actions['value'][0]
+            if ev.value - discharge < 0.0:
+                # Calculate the deviation from the bounds
+                deviation = abs(ev.value - discharge)
+                discharge = ev.value
+                reward = deviation
+
+            ev.charge = 0.0
+            ev.discharge = discharge
+
+        # Check if the EV meets the energy requirement for the next departure
+        next_departure = np.where(ev.schedule_requirement_soc > self.current_timestep)[0]
+        remains_trips = len(next_departure) > 0
+
+        if remains_trips:
+            next_departure_soc = ev.schedule_requirement_soc[next_departure[0]]
+            if ev.value < next_departure_soc / ev.capacity_max:
+                # Calculate the deviation from the value
+                deviation = next_departure_soc - ev.value
+                reward += deviation
+
+        return reward
+
     # Create Aggregator Observation Space
     def __create_aggregator_observations__(self) -> gym.spaces.Dict:
         """
@@ -554,9 +659,23 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
 
         return reward
 
+    # Get next agent to act
+    def __get_next_agent__(self):
+        """
+        Get the next agent to act
+        :return: None
+        """
+
+        # Check the executed agents
+        next_agent = self._agent_sequence[self._executed_agent]
+
+        # Increment the executed agent
+        self._executed_agent += 1
+
+        return next_agent
+
     # Get observations
-    # TODO: Check if this is the correct way to get the observations sequentially
-    def __get_observations__(self):
+    def __get_next_observations__(self) -> dict:
         """
         Get the observations for the environment
         :return: dict
@@ -573,6 +692,9 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         # Create new agents
         self.agents = self.__create_agents__()
 
+        # Set the flag of executed agents
+        self._executed_agent = 0
+
         # Set the termination and truncation flags
         self.terminateds = set()
         self.truncateds = set()
@@ -584,7 +706,7 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         self.current_available_energy = 0
 
         # Get the new observations
-        observations = self.__get_observations__()
+        observations = self.__get_next_observations__()
 
         return observations, {}
 
@@ -592,11 +714,73 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
     def step(self, action_dict: dict) -> tuple:
         """
         Step function for environment transitions
+        Agents will act in the following order:
+        1. Generators
+        2. EVs
+        3. Storages
+        4. Aggregator
+
         :param action_dict: dict
         :return: tuple
         """
 
+        # Check for completion of the episode
+        if self.current_timestep >= self.loads[0].value.shape[0]:
+            terminations = {agent: True for agent in self.agents}
+            truncations = {agent: True for agent in self.agents}
+            terminations['__all__'] = True
+            truncations['__all__'] = True
+
+            observations = self.__get_next_observations__()
+            reward = {agent: 0 for agent in self.agents}
+            info = {agent: {} for agent in self.agents}
+
+        # Check for existing actions
+        exists_actions = len(action_dict) > 0
+
+        # Choose the agent to act
+        agent = self.__get_next_agent__()
+
         # Execute the actions
+        if exists_actions:
+            if self._executed_agent < len(self._agent_sequence):
+                if agent in action_dict.keys():
+                    actions = action_dict[agent]
+                    reward = 0.0
+
+                    # Execute the actions for the generators
+                    if agent in [resource.name for resource in self.generators]:
+                        self.accumulated_generator_penalty += self.__execute_generator_actions__(self.agents[agent],
+                                                                                                 actions)
+
+                    # Execute the actions for the storages
+                    elif agent in [resource.name for resource in self.storages]:
+                        storage_cost, storage_penalty = self.__execute_storage_actions__(self.agents[agent],
+                                                                                         actions)
+                        self.accumulated_storage_cost += storage_cost
+                        self.accumulated_storage_penalty += storage_penalty
+
+                    # Execute the actions for the EVs
+                    elif agent in [resource.name for resource in self.evs]:
+                        self.accumulated_ev_penalty += self.__execute_ev_actions__(self.agents[agent],
+                                                                                   actions)
+
+                    # Execute the actions for the aggregator
+                    elif agent == 'aggregator':
+                        if actions['ctl'] == 1:
+                            self.accumulated_import_penalty += self.__execute_aggregator_actions__(actions)
+                        elif actions['ctl'] == 2:
+                            self.accumulated_export_penalty += self.__execute_aggregator_actions__(actions)
+
+                    return self.__get_next_observations__(), 0.0, False, {}
+
+            else:
+                real_reward = (self.accumulated_generator_penalty +
+                               self.accumulated_storage_penalty +
+                               self.accumulated_ev_penalty +
+                               self.accumulated_import_penalty +
+                               self.accumulated_export_penalty)
+                return self.__get_next_observations__(), 0.0, False, {}
 
         # Get the new observations
         # This needs to be done sequentially
