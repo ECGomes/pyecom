@@ -8,3 +8,4 @@ from .storage import Storage
 from .load import Load, LoadProbabilistic
 from .vehicle import Vehicle
 from .binary_resource import BinaryResource
+from .aggregator import Aggregator

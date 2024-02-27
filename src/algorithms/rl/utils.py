@@ -39,12 +39,9 @@ def separate_resources(resources: list[BaseResource]) -> dict:
         "evs": [resource
                 for resource in resources
                 if resource.name.startswith('ev')],
-        "imports": [resource
-                    for resource in resources
-                    if resource.name.startswith('import')],
-        "exports": [resource
-                    for resource in resources
-                    if resource.name.startswith('export')]
+        "aggregator": [resource
+                       for resource in resources
+                       if resource.name.startswith('aggregator')],
     }
 
     return separated_resources
