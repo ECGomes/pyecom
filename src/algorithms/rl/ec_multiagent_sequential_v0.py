@@ -1,3 +1,5 @@
+from typing import Union
+
 import gymnasium as gym
 import numpy as np
 from copy import deepcopy
@@ -79,8 +81,10 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
                                [resource.name for resource in self.evs] + \
                                [resource.name for resource in self.storages] + \
                                ['aggregator']
+
         self._executed_agent: int = 0
         self._current_agent = self._agent_sequence[self._executed_agent]
+        self._previous_agent = self._agent_sequence[self._executed_agent]
 
         # Observation space
         self._handle_observation_space()
@@ -111,17 +115,20 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         self.accumulated_import_penalty: float = 0.0
         self.accumulated_export_penalty: float = 0.0
 
+        # Balance history
+        self.balance_history = []
+
     # Create agents
     def __create_agents__(self) -> dict:
         agents = {}
         for agent in np.arange(len(self.generators)):
             agents[str(self.generators[agent].name)] = self.generators[agent]
 
-        for agent in np.arange(len(self.storages)):
-            agents[str(self.storages[agent].name)] = self.storages[agent]
-
         for agent in np.arange(len(self.evs)):
             agents[str(self.evs[agent].name)] = self.evs[agent]
+
+        for agent in np.arange(len(self.storages)):
+            agents[str(self.storages[agent].name)] = self.storages[agent]
 
         agents['aggregator'] = self.aggregator
 
@@ -197,7 +204,7 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         generator_observations = {}
         for gen in self.generators:
             generator_observations[gen.name] = gym.spaces.Dict({
-                'current_available_energy': gym.spaces.Box(low=0, high=9999.0, shape=(1,), dtype=np.float32),
+                'current_available_energy': gym.spaces.Box(low=-9999.0, high=9999.0, shape=(1,), dtype=np.float32),
                 'current_buy_price': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
                 'current_sell_price': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
                 'current_loads': gym.spaces.Box(low=0, high=max(self.load_consumption), shape=(1,), dtype=np.float32)
@@ -302,7 +309,7 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         for storage in self.storages:
             storage_observations[storage.name] = gym.spaces.Dict({
                 'current_soc': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
-                'current_available_energy': gym.spaces.Box(low=0, high=9999.0, shape=(1,), dtype=np.float32),
+                'current_available_energy': gym.spaces.Box(low=-9999.0, high=9999.0, shape=(1,), dtype=np.float32),
                 'current_loads': gym.spaces.Box(low=0, high=9999.0, shape=(1,), dtype=np.float32),
                 'current_buy_price': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
                 'current_sell_price': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32)
@@ -319,7 +326,8 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         """
 
         storage_observations: dict = {
-            'current_soc': np.array([storage.value / storage.capacity_max],
+            'current_soc': np.array([storage.value[self.current_timestep - 1] if self.current_timestep > 0
+                                     else storage.initial_charge],
                                     dtype=np.float32),
             'current_available_energy': np.array([self.current_available_energy],
                                                  dtype=np.float32),
@@ -371,49 +379,52 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
 
         # Idle state
         if actions['ctl'] == 0:
-            storage.charge = 0.0
-            storage.discharge = 0.0
+            storage.charge[self.current_timestep] = 0.0
+            storage.discharge[self.current_timestep] = 0.0
 
             return cost, penalty
 
         # Charge state
         elif actions['ctl'] == 1:
             charge = actions['value'][0]
-            if storage.value + charge > 1.0:
+            if storage.value[self.current_timestep] + charge > 1.0:
                 # Calculate the deviation from the bounds
-                deviation = storage.value + charge - 1.0
-                charge = 1.0 - storage.value
+                deviation = storage.value[self.current_timestep] + charge - 1.0
+                charge = 1.0 - storage.value[self.current_timestep]
                 penalty = deviation
 
             # Get the cost of the energy
             cost = charge * storage.cost_charge[self.current_timestep]
 
+            # Remove energy from the pool
+            self.current_available_energy -= charge * storage.capacity_max
+
             # Assign resource charge and discharge variables
-            storage.value += charge
-            storage.charge = charge
-            storage.discharge = 0.0
+            storage.value[self.current_timestep] += charge
+            storage.charge[self.current_timestep] = charge
+            storage.discharge[self.current_timestep] = 0.0
 
             return cost, penalty
 
         # Discharge state
         elif actions['ctl'] == 2:
             discharge = actions['value'][0]
-            if storage.value - discharge < 0.0:
+            if storage.value[self.current_timestep] - discharge < 0.0:
                 # Calculate the deviation from the bounds
-                deviation = abs(storage.value - discharge)
-                discharge = storage.value
+                deviation = abs(storage.value[self.current_timestep] - discharge)
+                discharge = storage.value[self.current_timestep]
                 penalty = deviation
 
             # Get the cost of the energy
             cost = discharge * storage.cost_discharge[self.current_timestep]
 
             # Assign resource charge and discharge variables
-            storage.value -= discharge
-            storage.charge = 0.0
-            storage.discharge = discharge
+            storage.value[self.current_timestep] -= discharge
+            storage.charge[self.current_timestep] = 0.0
+            storage.discharge[self.current_timestep] = discharge
 
             # Add the energy to the pool
-            self.current_available_energy += discharge
+            self.current_available_energy += discharge * storage.capacity_max
 
             return cost, penalty
 
@@ -440,7 +451,7 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         for ev in self.evs:
             ev_observations[ev.name] = gym.spaces.Dict({
                 'current_soc': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
-                'current_available_energy': gym.spaces.Box(low=0, high=9999.0, shape=(1,), dtype=np.float32),
+                'current_available_energy': gym.spaces.Box(low=-9999.0, high=9999.0, shape=(1,), dtype=np.float32),
                 'grid_connection': gym.spaces.Discrete(2),
                 'next_departure_time': gym.spaces.Box(low=0, high=9999, shape=(1,), dtype=np.int32),
                 'time_until_next_departure': gym.spaces.Box(low=0, high=9999, shape=(1,), dtype=np.int32),
@@ -469,8 +480,11 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         time_until_departure = abs(next_departure[0] - self.current_timestep) \
             if remains_trips else ev.schedule_connected.shape[0] - 1
 
+        next_departure = next_departure[0] if remains_trips else 9999
+
         ev_observations: dict = {
-            'current_soc': np.array([ev.value / ev.capacity_max],
+            'current_soc': np.array([ev.value[self.current_timestep - 1] if self.current_timestep > 0
+                                     else ev.initial_charge],
                                     dtype=np.float32),
             'current_available_energy': np.array([self.current_available_energy],
                                                  dtype=np.float32),
@@ -532,53 +546,65 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         # Set up the penalty for not meeting the energy requirement for the next departure
         penalty_trip: float = 0.0
 
+        # Check if it's the first timestep
+        if self.current_timestep == 0:
+            ev.value[self.current_timestep] = ev.initial_charge
+        else:
+            ev.value[self.current_timestep] = ev.value[self.current_timestep - 1]
+
         # First, check if the EV is connected to the grid
         if ev.schedule_connected[self.current_timestep] == 0:
-            ev.charge = 0.0
-            ev.discharge = 0.0
+            ev.charge[self.current_timestep] = 0.0
+            ev.discharge[self.current_timestep] = 0.0
             return cost, penalty, penalty_trip
 
         # Idle state
         if actions['ctl'] == 0:
-            ev.charge = 0.0
-            ev.discharge = 0.0
+            ev.charge[self.current_timestep] = 0.0
+            ev.discharge[self.current_timestep] = 0.0
 
         # Charge state
         elif actions['ctl'] == 1:
             charge = actions['value'][0]
-            if ev.value + charge > 1.0:
+            if ev.value[self.current_timestep] + charge > 1.0:
                 # Calculate the deviation from the bounds
-                deviation = ev.value + charge - 1.0
-                charge = 1.0 - ev.value
+                deviation = ev.value[self.current_timestep] + charge - 1.0
+                charge = 1.0 - ev.value[self.current_timestep]
                 penalty = deviation
 
             # Calculate the cost of charging
             cost = charge * ev.cost_charge[self.current_timestep]
 
+            # Remove energy from the pool
+            self.current_available_energy -= charge * ev.capacity_max
+
             # Assign resource charge and discharge variables
-            ev.value += charge
-            ev.charge = charge
-            ev.discharge = 0.0
+            ev.charge[self.current_timestep] = charge
+            ev.discharge[self.current_timestep] = 0.0
 
         # Discharge state
         elif actions['ctl'] == 2:
             discharge = actions['value'][0]
-            if ev.value - discharge < 0.0:
+            if ev.value[self.current_timestep] - discharge < 0.0:
                 # Calculate the deviation from the bounds
-                deviation = abs(ev.value - discharge)
-                discharge = ev.value
+                deviation = abs(ev.value[self.current_timestep] - discharge)
+                discharge = ev.value[self.current_timestep]
                 penalty = deviation
 
             # Calculate the cost of discharging
             cost = discharge * ev.cost_discharge[self.current_timestep]
 
             # Add discharged energy to the pool
-            self.current_available_energy += discharge
+            self.current_available_energy += discharge * ev.capacity_max
 
             # Assign resource charge and discharge variables
-            ev.value -= discharge
-            ev.charge = 0.0
-            ev.discharge = discharge
+            ev.charge[self.current_timestep] = 0.0
+            ev.discharge[self.current_timestep] = discharge
+
+        # Update EV storage
+        ev.value[self.current_timestep] = (ev.value[self.current_timestep ] +
+                                           ev.charge[self.current_timestep] -
+                                           ev.discharge[self.current_timestep])
 
         # Check if the EV meets the energy requirement for the next departure
         next_departure = np.where(ev.schedule_requirement_soc > self.current_timestep)[0]
@@ -589,10 +615,13 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
             if next_departure[0] == self.current_timestep:
                 # Check if the EV meets the energy requirement for departure
                 next_departure_soc = ev.schedule_requirement_soc[next_departure[0]]
-                if ev.value < next_departure_soc / ev.capacity_max:
+                if ev.value[self.current_timestep] < next_departure_soc / ev.capacity_max:
                     # Calculate the deviation from the value
-                    deviation = next_departure_soc - ev.value
+                    deviation = next_departure_soc - ev.value[self.current_timestep]
                     penalty_trip = deviation
+
+                else:
+                    ev.value[self.current_timestep] -= next_departure_soc / ev.capacity_max
 
         return cost, penalty, penalty_trip
 
@@ -610,7 +639,7 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         return gym.spaces.Dict({
             'current_buy_price': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
             'current_sell_price': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
-            'current_available_energy': gym.spaces.Box(low=0, high=9999.0, shape=(1,), dtype=np.float32)
+            'current_available_energy': gym.spaces.Box(low=-9999.0, high=9999.0, shape=(1,), dtype=np.float32)
         })
 
     # Handle aggregator observations
@@ -691,10 +720,10 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         # Export state
         elif actions['ctl'] == 2:
             exports = actions['value'][0]
-            if exports > self.aggregator.exports_max[self.current_timestep]:
+            if exports > self.aggregator.export_max[self.current_timestep]:
                 # Calculate the deviation from the bounds
                 deviation = exports - self.aggregator.export_max[self.current_timestep]
-                exports = self.aggregator.exports_max[self.current_timestep]
+                exports = self.aggregator.export_max[self.current_timestep]
                 penalty = deviation
 
             # Remove from the available pool
@@ -715,16 +744,15 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         :return: None
         """
 
+        # Increment the executed agent
+        self._executed_agent += 1
+
         # Check if every agent has acted
-        if self._executed_agent >= len(self._agent_sequence):
-            self._executed_agent = 0
+        self._executed_agent = self._executed_agent % len(self._agent_sequence)
 
         # Check the executed agents
         next_agent = self._agent_sequence[self._executed_agent]
         self._current_agent = self.agents[next_agent]
-
-        # Increment the executed agent
-        self._executed_agent += 1
 
         return
 
@@ -773,9 +801,9 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         # Set the flag of executed agents
         self._executed_agent = 0
 
-        # Current agent
-        self._current_agent = self._agent_sequence[self._executed_agent]
-        self._current_agent = self.agents[self._current_agent]
+        # Agent pointers reset
+        self._current_agent = self.agents[self._agent_sequence[self._executed_agent]]
+        self._previous_agent = self.agents[self._agent_sequence[self._executed_agent]]
 
         # Set the initial pool of available energy to load consumption at the first timestep
         self.current_available_energy = -self.load_consumption[0]
@@ -789,6 +817,20 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         self.current_production = 0
         self.current_consumption = 0
         self.current_available_energy = 0
+
+        # Reset penalties and costs
+        self.accumulated_generator_cost = 0.0
+        self.accumulated_storage_cost = 0.0
+        self.accumulated_ev_cost = 0.0
+        self.accumulated_import_cost = 0.0
+        self.accumulated_export_cost = 0.0
+
+        self.accumulated_generator_penalty = 0.0
+        self.accumulated_storage_penalty = 0.0
+        self.accumulated_ev_penalty = 0.0
+        self.accumulated_ev_penalty_trip = 0.0
+        self.accumulated_import_penalty = 0.0
+        self.accumulated_export_penalty = 0.0
 
         observations = {
             self._current_agent.name: self.__get_generator_observations__()
@@ -812,14 +854,8 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
 
         # Check for completion of the episode
         if self.current_timestep >= self.loads[0].value.shape[0]:
-            terminateds = {agent: True for agent in self.agents}
-            terminateds['__all__'] = True
-            truncateds = {agent: True for agent in self.agents}
-            truncateds['__all__'] = True
-
-            observations = {}
-            reward = {agent: 0 for agent in self.agents}
-            info = {}
+            terminateds, truncateds = self._log_ending(True)
+            observations, reward, info = {}, {}, {}
 
             return observations, reward, terminateds, truncateds, info
 
@@ -827,8 +863,9 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         exists_actions = len(action_dict) > 0
 
         # Choose the agent to act
-        self.__get_next_agent__()
-        agent = self._current_agent
+        # agent = self._current_agent
+        agent = self.agents[self._agent_sequence[self._executed_agent % len(self._agent_sequence)]]
+        self._current_agent = agent
 
         # Observations
         observations = {}
@@ -841,134 +878,115 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
 
         # Execute the actions
         if exists_actions:
-            if self._executed_agent < len(self._agent_sequence):
+            # Check if the agent is not the aggregator
+            if not agent.name.startswith('aggregator'):
+
+                # Check if the agent has actions
                 if agent.name in action_dict.keys():
+                    # Get the actions of the agent
                     actions = action_dict[agent.name]
 
-                    # Execute the actions for the generators
-                    if agent.name.startswith('gen'):
-                        generator_cost, generator_penalty = self.__execute_generator_actions__(self._current_agent,
-                                                                                               actions)
-                        self.accumulated_generator_cost += generator_cost
-                        self.accumulated_generator_penalty += generator_penalty
+                    action_result_00: float = 0.0
+                    action_result_01: float = 0.0
+                    action_result_02: float = 0.0
 
-                    # Execute the actions for the storages
-                    elif agent.name.startswith('storage'):
-                        storage_cost, storage_penalty = self.__execute_storage_actions__(self._current_agent,
-                                                                                         actions)
-                        self.accumulated_storage_cost += storage_cost
-                        self.accumulated_storage_penalty += storage_penalty
+                    action_result_00, action_result_01, action_result_02 = self._execute_action(agent, actions)
 
-                    # Execute the actions for the EVs
-                    elif agent.name.startswith('ev'):
-                        ev_cost, ev_penalty, ev_penalty_trip = self.__execute_ev_actions__(self._current_agent,
-                                                                                           actions)
-                        self.accumulated_ev_cost += ev_cost
-                        self.accumulated_ev_penalty += ev_penalty
-                        self.accumulated_ev_penalty_trip += ev_penalty_trip
+                    # Execute the actions
+                    self._execute_action(agent, actions)
 
-                    # Execute the actions for the aggregator
-                    elif agent.name.startswith('aggregator'):
-                        if actions['ctl'] == 1:
-                            import_cost, import_penalty = self.__execute_aggregator_actions__(actions)
-                            self.accumulated_import_cost += import_cost
-                            self.accumulated_import_penalty += import_penalty
-                        elif actions['ctl'] == 2:
-                            export_cost, export_penalty = self.__execute_aggregator_actions__(actions)
-                            self.accumulated_export_cost += export_cost
-                            self.accumulated_export_penalty += export_penalty
-
-                    # Set up the info dictionary
-                    info = {}
-                    if agent.name.startswith('generator'):
-                        info[agent.name] = {'production': agent.value}
-                    elif agent.name.startswith('storage'):
-                        info[agent.name] = {'current': agent.value,
-                                        'charge': agent.charge,
-                                        'discharge': agent.discharge}
-                    elif agent.name.startswith('ev'):
-                        info[agent.name] = {'current': agent.value,
-                                        'charge': agent.charge,
-                                        'discharge': agent.discharge}
-                    elif agent.name.startswith('aggregator'):
-                        info[agent.name] = {'import': self.aggregator.imports,
-                                            'export': self.aggregator.exports}
+                    # Get the executed action reward
+                    mid_rewards = {self._current_agent.name: self._calculate_reward(agent,
+                                                                                    action_result_00,
+                                                                                    action_result_01,
+                                                                                    action_result_02)}
 
                     # Terminations and truncations
-                    terminations = {a: False for a in self.agents}
-                    terminations['__all__'] = False
-                    truncations = {a: False for a in self.agents}
-                    truncations['__all__'] = False
+                    terminateds, truncateds = self._log_ending(False)
 
-                    # Dummy rewards
-                    #mid_rewards = {a: 0 for a in self.agents}
-                    mid_rewards = {agent.name: 0}
+                    # Save previous agent to log
+                    self._previous_agent = deepcopy(agent)
 
-                    return self.__get_next_observations__(), mid_rewards, \
-                        terminations, truncations, info
+                    # Increment the executed agent
+                    self._executed_agent += 1
+
+                    # Get the next agent to act
+                    agent = self.agents[self._agent_sequence[self._executed_agent]]
+                    self._current_agent = agent
+
+                    # Log the info
+                    info = self._log_info()
+
+                    # Get the observations for the next agent
+                    next_obs = self.__get_next_observations__()
+
+                    return next_obs, mid_rewards, \
+                        terminateds, truncateds, info
 
             else:
-                # Calculate the costs
-                total_cost = (self.accumulated_generator_cost +
-                              self.accumulated_storage_cost +
-                              self.accumulated_ev_cost +
-                              self.accumulated_import_cost +
-                              self.accumulated_export_cost)
+                # Now it's the aggregator
+                if agent.name in action_dict.keys():
 
-                # Calculate the penalties
-                total_penalty = (self.accumulated_generator_penalty +
-                                 self.accumulated_storage_penalty * self.storage_action_penalty +
-                                 self.accumulated_ev_penalty * self.ev_action_penalty +
-                                 self.accumulated_ev_penalty_trip * self.ev_requirement_penalty +
-                                 self.accumulated_import_penalty * self.import_penalty +
-                                 self.accumulated_export_penalty * self.export_penalty)
+                    # Get the actions of the agent
+                    actions = action_dict[agent.name]
 
-                # Calculate the balance penalty
-                balance_penalty = self.balance_penalty * abs(self.current_available_energy)
+                    # Penalties placeholders
+                    action_result_00: float = 0.0
+                    action_result_01: float = 0.0
+                    action_result_02: float = 0.0
 
-                # Calculate the true reward
-                reward = {a: total_cost - total_penalty - balance_penalty for
-                          a in self.agents}
+                    # Execute the actions
+                    action_result_00, action_result_01, action_result_02 = self._execute_action(agent,
+                                                                                                actions)
 
-                info = {}
-                if agent.name.startswith('generator'):
-                    info[agent.name] = {'production': agent.value}
-                elif agent.name.startswith('storage'):
-                    info[agent.name] = {'current': agent.value,
-                                        'charge': agent.charge,
-                                        'discharge': agent.discharge}
-                elif agent.name.startswith('ev'):
-                    info[agent.name] = {'current': agent.value,
-                                        'charge': agent.charge,
-                                        'discharge': agent.discharge}
-                elif agent.name.startswith('aggregator'):
-                    info[agent.name] = {'import': self.aggregator.imports,
-                                        'export': self.aggregator.exports}
+                    # Calculate the true reward
+                    reward = {self._current_agent.name: self._calculate_reward(agent, action_result_00,
+                                                                               action_result_01,
+                                                                               action_result_02)}
 
-                # Update timestep
-                self.current_timestep += 1
+                    # Log the info
+                    info = self._log_info()
 
-                # Terminations and truncations
-                terminateds = {a: False for a in self.agents}
-                terminateds['__all__'] = False
-                truncateds = {a: False for a in self.agents}
-                truncateds['__all__'] = False
+                    # Update timestep
+                    self.current_timestep += 1
 
-                # Check for end of episode
-                if self.current_timestep >= self.loads[0].value.shape[0]:
-                    terminateds = {a: True for a in self.agents}
-                    terminateds['__all__'] = True
-                    truncateds = {a: True for a in self.agents}
-                    truncateds['__all__'] = True
-                    self.agents = []
+                    # Set the executed agent to 0
+                    self._executed_agent = 0
 
-                # Update the available energy pool
-                self.current_available_energy = -self.load_consumption[self.current_timestep
-                                                                       % self.load_consumption.shape[0]]
+                    # Get the next agent to act
+                    agent = self.agents[self._agent_sequence[self._executed_agent]]
+                    self._current_agent = agent
 
-                new_observations = self.__get_next_observations__()
+                    # Terminations and truncations
+                    terminateds, truncateds = self._log_ending(False)
 
-                return new_observations, reward, terminateds, truncateds, info
+                    # Check for end of episode
+                    if self.current_timestep >= self.loads[0].value.shape[0]:
+                        terminateds, truncateds = self._log_ending(True)
+                        self.agents = []
+
+                    self.balance_history.append(self.current_available_energy)
+
+                    # Update the available energy pool
+                    self.current_available_energy = -self.load_consumption[self.current_timestep
+                                                                           % self.load_consumption.shape[0]]
+
+                    # Get the observation for the next timestep
+                    next_obs = self.__get_next_observations__()
+
+                    return next_obs, reward, terminateds, truncateds, info
+
+                else:
+                    terminateds, truncateds = self._log_ending(False)
+                    next_obs = self.__get_next_observations__()
+
+                    # Wait for the aggregator to act
+                    return next_obs, reward, terminateds, truncateds, info
+
+        # Check if it is getting stuck here
+        # print('No actions for agent')
+        # print(self._current_agent.name)
+        # print(action_dict)
 
         # Terminations and truncations
         terminateds = {a: False for a in self.agents}
@@ -976,10 +994,120 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         truncateds = {a: False for a in self.agents}
         truncateds['__all__'] = False
 
-        if self.current_timestep >= self.loads[0].value.shape[0]:
-            terminateds = {a: True for a in self.agents}
-            terminateds['__all__'] = True
-            truncateds = {a: True for a in self.agents}
-            truncateds['__all__'] = True
-
         return observations, reward, terminateds, truncateds, info
+
+    # Handle action execution
+    def _execute_action(self, agent, actions) -> tuple[float, float, float]:
+        # Execute the actions for the generators
+        if agent.name.startswith('generator'):
+            generator_cost, generator_penalty = self.__execute_generator_actions__(agent,
+                                                                                   actions)
+            self.accumulated_generator_cost += generator_cost
+            self.accumulated_generator_penalty += generator_penalty
+
+            return generator_cost, generator_penalty, 0.0
+
+        # Execute the actions for the storages
+        elif agent.name.startswith('storage'):
+            storage_cost, storage_penalty = self.__execute_storage_actions__(agent,
+                                                                             actions)
+            self.accumulated_storage_cost += storage_cost
+            self.accumulated_storage_penalty += storage_penalty
+
+            return storage_cost, storage_penalty, 0.0
+
+        elif agent.name.startswith('ev'):
+            ev_cost, ev_penalty, ev_penalty_trip = self.__execute_ev_actions__(agent,
+                                                                               actions)
+            self.accumulated_ev_cost += ev_cost
+            self.accumulated_ev_penalty += ev_penalty
+            self.accumulated_ev_penalty_trip += ev_penalty_trip
+
+            return ev_cost, ev_penalty, ev_penalty_trip
+
+        elif agent.name.startswith('aggregator'):
+            if actions['ctl'] == 1:
+                import_cost, import_penalty = self.__execute_aggregator_actions__(actions)
+                self.accumulated_import_cost += import_cost
+                self.accumulated_import_penalty += import_penalty
+
+                return import_cost, import_penalty, 0.0
+
+            elif actions['ctl'] == 2:
+                export_cost, export_penalty = self.__execute_aggregator_actions__(actions)
+                self.accumulated_export_cost += export_cost
+                self.accumulated_export_penalty += export_penalty
+
+                return export_cost, export_penalty, 0.0
+
+        return 0.0, 0.0, 0.0
+
+    def _calculate_reward(self, agent, cost: float, penalty: float, additional_penalty: float) -> float:
+
+        # Calculate the penalties to use
+        if agent.name.startswith('generator'):
+            penalty *= 0.0
+        elif agent.name.startswith('storage'):
+            penalty *= self.storage_action_penalty
+        elif agent.name.startswith('ev'):
+            penalty *= self.ev_action_penalty
+            penalty += additional_penalty * self.ev_requirement_penalty
+        elif agent.name.startswith('aggregator'):
+            penalty *= self.import_penalty
+            penalty += additional_penalty * abs(self.current_available_energy)
+
+        # Calculate the reward
+        reward = -cost - penalty
+
+        return reward
+
+    # Build the info logs
+    def _log_info(self):
+
+        info = {}
+
+        if self._previous_agent is None:
+            info[self._current_agent.name] = {'current_timestep': self.current_timestep}
+
+        if self._current_agent.name.startswith('generator'):
+            if self._previous_agent.name.startswith('aggregator'):
+                info[self._current_agent.name] = {'import': self._previous_agent.imports[self.current_timestep - 1],
+                                                  'export': self._previous_agent.exports[self.current_timestep - 1]}
+            else:
+                info[self._current_agent.name] = {'value': self._current_agent.value[self.current_timestep]}
+        elif self._current_agent.name.startswith('storage'):
+            if self._previous_agent.name.startswith('generator'):
+                info[self._current_agent.name] = {'value': self._previous_agent.value[self.current_timestep]}
+            else:
+                info[self._current_agent.name] = {'current': self._current_agent.value[self.current_timestep],
+                                                  'charge': self._current_agent.charge[self.current_timestep],
+                                                  'discharge': self._current_agent.discharge[self.current_timestep]}
+        elif self._current_agent.name.startswith('ev'):
+            if self._previous_agent.name.startswith('storage'):
+                info[self._current_agent.name] = {'current': self._previous_agent.value[self.current_timestep],
+                                                  'charge': self._previous_agent.charge[self.current_timestep],
+                                                  'discharge': self._previous_agent.discharge[self.current_timestep]}
+            else:
+                info[self._current_agent.name] = {'current': self._current_agent.value[self.current_timestep],
+                                                  'charge': self._current_agent.charge[self.current_timestep],
+                                                  'discharge': self._current_agent.discharge[self.current_timestep]}
+        elif self._current_agent.name.startswith('aggregator'):
+            if self._previous_agent is not None:
+                if self._previous_agent.name.startswith('ev'):
+                    info[self._current_agent.name] = {'current': self._previous_agent.value[self.current_timestep],
+                                                      'charge': self._previous_agent.charge[self.current_timestep],
+                                                      'discharge': self._previous_agent.discharge[self.current_timestep]}
+            else:
+                info[self._current_agent.name] = {'import': self._current_agent.imports[self.current_timestep],
+                                                  'export': self._current_agent.exports[self.current_timestep]}
+
+        return info
+
+    # Log ending of episode
+    def _log_ending(self, flag: bool) -> tuple[dict, dict]:
+        terminateds = {a: flag for a in self.agents}
+        terminateds['__all__'] = flag
+        truncateds = {a: flag for a in self.agents}
+        truncateds['__all__'] = flag
+
+        return terminateds, truncateds
