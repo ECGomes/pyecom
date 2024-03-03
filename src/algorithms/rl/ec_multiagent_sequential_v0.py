@@ -118,6 +118,13 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         # Balance history
         self.balance_history = []
 
+        # History of the environment
+        self.history = []
+        self.history_dictionary = {}
+
+        # Current real reward
+        self.current_real_reward = {}
+
     # Create agents
     def __create_agents__(self) -> dict:
         agents = {}
@@ -247,11 +254,11 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
 
         generator_actions = {}
         for gen in self.generators:
-            renewable = False
-            if isinstance(gen.is_renewable, bool):
-                renewable = gen.is_renewable
+            # renewable = False
+            # if isinstance(gen.is_renewable, bool):
+            #     renewable = gen.is_renewable
 
-            if renewable | (gen.is_renewable == 2):  # Hack for the Excel file
+            if gen.is_renewable == 2.0:  # Hack for the Excel file
                 generator_actions[gen.name] = gym.spaces.Dict({
                     'production': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32)
                 })
@@ -272,7 +279,6 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         """
 
         # Calculate the cost of the generator
-        cost: float = 0.0
         penalty: float = 0.0
 
         produced_energy: float = 0.0
@@ -289,6 +295,13 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         gen.value[self.current_timestep] = produced_energy
         self.current_production += gen.value[self.current_timestep]
         self.current_available_energy += gen.value[self.current_timestep]
+
+        # Update on the resource
+        # Get the index of the corresponding name
+        idx = [i for i, resource in enumerate(self.generators) if resource.name == gen.name][0]
+        self.generators[idx].value[self.current_timestep] = produced_energy
+
+        cost: float = produced_energy * gen.cost[self.current_timestep]
 
         return cost, penalty
 
@@ -377,6 +390,16 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         # The reward will be the deviation from the bounds, to be later used as a penalty
         penalty: float = 0.0
 
+        idx = [i for i, resource in enumerate(self.storages) if resource.name == storage.name][0]
+
+        # Check if it is the first timestep
+        if self.current_timestep == 0:
+            storage.value[self.current_timestep] = storage.initial_charge
+            self.storages[idx].value[self.current_timestep] = storage.initial_charge
+        else:
+            storage.value[self.current_timestep] = storage.value[self.current_timestep - 1]
+            self.storages[idx].value[self.current_timestep] = storage.value[self.current_timestep - 1]
+
         # Idle state
         if actions['ctl'] == 0:
             storage.charge[self.current_timestep] = 0.0
@@ -387,6 +410,10 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         # Charge state
         elif actions['ctl'] == 1:
             charge = actions['value'][0]
+
+            # Set the charge as a percentage of the maximum charge allowed
+            charge = charge * storage.charge_max[self.current_timestep] / storage.capacity_max
+
             if storage.value[self.current_timestep] + charge > 1.0:
                 # Calculate the deviation from the bounds
                 deviation = storage.value[self.current_timestep] + charge - 1.0
@@ -404,11 +431,20 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
             storage.charge[self.current_timestep] = charge
             storage.discharge[self.current_timestep] = 0.0
 
+            # Update as well on the resource
+            self.storages[idx].value[self.current_timestep] += charge
+            self.storages[idx].charge[self.current_timestep] = charge
+            self.storages[idx].discharge[self.current_timestep] = 0.0
+
             return cost, penalty
 
         # Discharge state
         elif actions['ctl'] == 2:
             discharge = actions['value'][0]
+
+            # Set discharge as a percentage of the maximum discharge allowed
+            discharge = discharge * storage.discharge_max[self.current_timestep] / storage.capacity_max
+
             if storage.value[self.current_timestep] - discharge < 0.0:
                 # Calculate the deviation from the bounds
                 deviation = abs(storage.value[self.current_timestep] - discharge)
@@ -422,6 +458,11 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
             storage.value[self.current_timestep] -= discharge
             storage.charge[self.current_timestep] = 0.0
             storage.discharge[self.current_timestep] = discharge
+
+            # Update as well on the resource
+            self.storages[idx].value[self.current_timestep] -= discharge
+            self.storages[idx].charge[self.current_timestep] = 0.0
+            self.storages[idx].discharge[self.current_timestep] = discharge
 
             # Add the energy to the pool
             self.current_available_energy += discharge * storage.capacity_max
@@ -546,17 +587,35 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         # Set up the penalty for not meeting the energy requirement for the next departure
         penalty_trip: float = 0.0
 
+        idx = [i for i, resource in enumerate(self.evs) if resource.name == ev.name][0]
+
         # Check if it's the first timestep
         if self.current_timestep == 0:
             ev.value[self.current_timestep] = ev.initial_charge
+            self.evs[idx].value[self.current_timestep] = ev.initial_charge
         else:
             ev.value[self.current_timestep] = ev.value[self.current_timestep - 1]
+            self.evs[idx].value[self.current_timestep] = ev.value[self.current_timestep - 1]
 
         # First, check if the EV is connected to the grid
         if ev.schedule_connected[self.current_timestep] == 0:
+            ev.value[self.current_timestep] = 0.0
             ev.charge[self.current_timestep] = 0.0
             ev.discharge[self.current_timestep] = 0.0
+
+            self.evs[idx].value[self.current_timestep] = 0.0
+            self.evs[idx].charge[self.current_timestep] = 0.0
+            self.evs[idx].discharge[self.current_timestep] = 0.0
+
             return cost, penalty, penalty_trip
+
+        # Check if EV is arriving
+        if ev.schedule_arrival_soc[self.current_timestep] > 0.0:
+            ev.value[self.current_timestep] = (ev.schedule_arrival_soc[self.current_timestep]
+                                               / ev.capacity_max)
+
+            self.evs[idx].value[self.current_timestep] = (ev.schedule_arrival_soc[self.current_timestep]
+                                                          / ev.capacity_max)
 
         # Idle state
         if actions['ctl'] == 0:
@@ -566,6 +625,10 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         # Charge state
         elif actions['ctl'] == 1:
             charge = actions['value'][0]
+
+            # Set charge to a percentage of the maximum charge allowed
+            charge = charge * ev.schedule_charge[self.current_timestep] / ev.capacity_max
+
             if ev.value[self.current_timestep] + charge > 1.0:
                 # Calculate the deviation from the bounds
                 deviation = ev.value[self.current_timestep] + charge - 1.0
@@ -585,6 +648,10 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         # Discharge state
         elif actions['ctl'] == 2:
             discharge = actions['value'][0]
+
+            # Set discharge to a percentage of the maximum discharge allowed
+            discharge = discharge * ev.schedule_discharge[self.current_timestep] / ev.capacity_max
+
             if ev.value[self.current_timestep] - discharge < 0.0:
                 # Calculate the deviation from the bounds
                 deviation = abs(ev.value[self.current_timestep] - discharge)
@@ -602,9 +669,14 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
             ev.discharge[self.current_timestep] = discharge
 
         # Update EV storage
-        ev.value[self.current_timestep] = (ev.value[self.current_timestep ] +
+        ev.value[self.current_timestep] = (ev.value[self.current_timestep] +
                                            ev.charge[self.current_timestep] -
                                            ev.discharge[self.current_timestep])
+
+        # Update the resource
+        self.evs[idx].value[self.current_timestep] = ev.value[self.current_timestep]
+        self.evs[idx].charge[self.current_timestep] = ev.charge[self.current_timestep]
+        self.evs[idx].discharge[self.current_timestep] = ev.discharge[self.current_timestep]
 
         # Check if the EV meets the energy requirement for the next departure
         next_departure = np.where(ev.schedule_requirement_soc > self.current_timestep)[0]
@@ -620,8 +692,13 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
                     deviation = next_departure_soc - ev.value[self.current_timestep]
                     penalty_trip = deviation
 
+                    # Discharge the EV with the possible energy
+                    ev.value[self.current_timestep] = 0.0
+                    self.evs[idx].value[self.current_timestep] = 0.0
+
                 else:
                     ev.value[self.current_timestep] -= next_departure_soc / ev.capacity_max
+                    self.evs[idx].value[self.current_timestep] -= next_departure_soc / ev.capacity_max
 
         return cost, penalty, penalty_trip
 
@@ -676,7 +753,7 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         })
 
     # Execute aggregator actions
-    def __execute_aggregator_actions__(self, actions) -> tuple[float, float]:
+    def __execute_aggregator_actions__(self, agent, actions) -> tuple[float, float]:
         """
         Execute the actions for the aggregator
         :param actions: actions to be executed
@@ -691,25 +768,83 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         # The reward will be the deviation from the bounds, to be later used as a penalty
         penalty: float = 0.0
 
+        # If we still have energy left, there is no need to import extra energy
+        if self.current_available_energy > 0:
+
+            # Force to export
+            # 1 - Get the deviation from the bounds
+            to_export = self.current_available_energy
+            if to_export > agent.export_max[self.current_timestep]:
+                deviation = to_export - agent.export_max[self.current_timestep]
+                to_export = agent.export_max[self.current_timestep]
+                penalty = deviation
+
+            # 2 - Set the exports for agent and resource
+            agent.imports[self.current_timestep] = 0.0
+            agent.exports[self.current_timestep] = to_export
+
+            self.aggregator.imports[self.current_timestep] = 0.0
+            self.aggregator.exports[self.current_timestep] = to_export
+
+            # 3 - Update the available energy pool
+            self.current_available_energy -= to_export
+
+            return cost, penalty
+
+        # Check if there is a surplus of energy that can be exported
+        if self.current_available_energy < 0:
+
+            # If not, we are forced to import
+            to_import = abs(self.current_available_energy)
+            if to_import > agent.import_max[self.current_timestep]:
+                # Calculate the deviation from the bounds
+                deviation = to_import - agent.import_max[self.current_timestep]
+                to_import = agent.import_max[self.current_timestep]
+                penalty = deviation
+
+            # Set the imports for agent and resource
+            agent.imports[self.current_timestep] = to_import
+            agent.exports[self.current_timestep] = 0.0
+
+            self.aggregator.imports[self.current_timestep] = to_import
+            self.aggregator.exports[self.current_timestep] = 0.0
+
+            # Update the available energy pool
+            self.current_available_energy += to_import
+
+            # Get the associated costs of importation
+            cost = to_import * agent.import_cost[self.current_timestep]
+
+            return cost, penalty
+
         # Idle state
         if actions['ctl'] == 0:
+
+            agent.imports[self.current_timestep] = 0.0
+            agent.exports[self.current_timestep] = 0.0
+
             self.aggregator.imports[self.current_timestep] = 0.0
             self.aggregator.exports[self.current_timestep] = 0.0
 
         # Import state
         elif actions['ctl'] == 1:
+
             imports = actions['value'][0]
-            if imports > self.aggregator.import_max[self.current_timestep]:
+            if imports > agent.import_max[self.current_timestep]:
                 # Calculate the deviation from the bounds
-                deviation = imports - self.aggregator.import_max[self.current_timestep]
-                imports = self.aggregator.import_max[self.current_timestep]
+                deviation = imports - agent.import_max[self.current_timestep]
+                imports = agent.import_max[self.current_timestep]
                 penalty = deviation
 
             # Calculate the cost of the imports
-            cost = imports * self.aggregator.import_cost[self.current_timestep]
+            cost = imports * agent.import_cost[self.current_timestep]
 
             # Add to the available pool
             self.current_available_energy += imports
+
+            # Update the agent
+            agent.imports[self.current_timestep] = imports
+            agent.exports[self.current_timestep] = 0.0
 
             # Set resource values
             self.aggregator.imports[self.current_timestep] = imports
@@ -720,20 +855,27 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         # Export state
         elif actions['ctl'] == 2:
             exports = actions['value'][0]
-            if exports > self.aggregator.export_max[self.current_timestep]:
+            if exports > agent.export_max[self.current_timestep]:
                 # Calculate the deviation from the bounds
-                deviation = exports - self.aggregator.export_max[self.current_timestep]
-                exports = self.aggregator.export_max[self.current_timestep]
+                deviation = exports - agent.export_max[self.current_timestep]
+                exports = agent.export_max[self.current_timestep]
                 penalty = deviation
 
             # Remove from the available pool
             self.current_available_energy -= exports
 
+            # Get the income from the exports value
+            cost = exports * agent.export_cost[self.current_timestep]
+
+            # Update the agent
+            agent.imports[self.current_timestep] = 0.0
+            agent.exports[self.current_timestep] = exports
+
             # Set resource values
             self.aggregator.imports[self.current_timestep] = 0.0
             self.aggregator.exports[self.current_timestep] = exports
 
-            return cost, penalty
+            return -cost, penalty
 
         return cost, penalty
 
@@ -832,6 +974,11 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         self.accumulated_import_penalty = 0.0
         self.accumulated_export_penalty = 0.0
 
+        # Clear the history
+        self.balance_history = []
+        self.history = []
+        self.history_dictionary = {}
+
         observations = {
             self._current_agent.name: self.__get_generator_observations__()
         }
@@ -886,20 +1033,20 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
                     # Get the actions of the agent
                     actions = action_dict[agent.name]
 
-                    action_result_00: float = 0.0
-                    action_result_01: float = 0.0
-                    action_result_02: float = 0.0
-
+                    # Execute the actions
                     action_result_00, action_result_01, action_result_02 = self._execute_action(agent, actions)
 
-                    # Execute the actions
-                    self._execute_action(agent, actions)
+                    # Save the agent state to the log
+                    self._log_agents(deepcopy(agent))
 
-                    # Get the executed action reward
-                    mid_rewards = {self._current_agent.name: self._calculate_reward(agent,
-                                                                                    action_result_00,
-                                                                                    action_result_01,
-                                                                                    action_result_02)}
+                    # Real rewards
+                    self.current_real_reward[self._current_agent.name] = self._calculate_reward(agent,
+                                                                                                action_result_00,
+                                                                                                action_result_01,
+                                                                                                action_result_02)
+
+                    # mid_reward = {agent.name: 0}
+                    mid_reward = {}
 
                     # Terminations and truncations
                     terminateds, truncateds = self._log_ending(False)
@@ -920,7 +1067,7 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
                     # Get the observations for the next agent
                     next_obs = self.__get_next_observations__()
 
-                    return next_obs, mid_rewards, \
+                    return next_obs, mid_reward, \
                         terminateds, truncateds, info
 
             else:
@@ -930,19 +1077,20 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
                     # Get the actions of the agent
                     actions = action_dict[agent.name]
 
-                    # Penalties placeholders
-                    action_result_00: float = 0.0
-                    action_result_01: float = 0.0
-                    action_result_02: float = 0.0
-
                     # Execute the actions
                     action_result_00, action_result_01, action_result_02 = self._execute_action(agent,
                                                                                                 actions)
 
+                    # Log the agent
+                    self._log_agents(deepcopy(agent))
+
                     # Calculate the true reward
-                    reward = {self._current_agent.name: self._calculate_reward(agent, action_result_00,
-                                                                               action_result_01,
-                                                                               action_result_02)}
+                    self.current_real_reward[self._current_agent.name] = self._calculate_reward(agent,
+                                                                                                action_result_00,
+                                                                                                action_result_01,
+                                                                                                action_result_02)
+
+                    real_rewards = deepcopy(self.current_real_reward)
 
                     # Log the info
                     info = self._log_info()
@@ -957,6 +1105,8 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
                     agent = self.agents[self._agent_sequence[self._executed_agent]]
                     self._current_agent = agent
 
+                    # Set the current rewards to an empty dictionary
+
                     # Terminations and truncations
                     terminateds, truncateds = self._log_ending(False)
 
@@ -966,6 +1116,16 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
                         self.agents = []
 
                     self.balance_history.append(self.current_available_energy)
+                    self.history.append(self.history_dictionary)
+
+                    self.history_dictionary = {}
+
+                    # Each agent will receive the same reward (of the community)
+                    sum_rewards = sum(real_rewards.values())
+
+                    # Add a positive reward in case the balance is 0
+                    if self.current_available_energy == 0:
+                        sum_rewards += 1000.0
 
                     # Update the available energy pool
                     self.current_available_energy = -self.load_consumption[self.current_timestep
@@ -974,14 +1134,16 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
                     # Get the observation for the next timestep
                     next_obs = self.__get_next_observations__()
 
-                    return next_obs, reward, terminateds, truncateds, info
+                    community_rewards = {a: sum_rewards for a in self.agents}
 
-                else:
-                    terminateds, truncateds = self._log_ending(False)
-                    next_obs = self.__get_next_observations__()
+                    return next_obs, community_rewards, terminateds, truncateds, info
+
+                #else:
+                #    terminateds, truncateds = self._log_ending(False)
+                #    next_obs = self.__get_next_observations__()
 
                     # Wait for the aggregator to act
-                    return next_obs, reward, terminateds, truncateds, info
+                #    return next_obs, reward, terminateds, truncateds, info
 
         # Check if it is getting stuck here
         # print('No actions for agent')
@@ -1027,14 +1189,16 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
 
         elif agent.name.startswith('aggregator'):
             if actions['ctl'] == 1:
-                import_cost, import_penalty = self.__execute_aggregator_actions__(actions)
+                import_cost, import_penalty = self.__execute_aggregator_actions__(agent,
+                                                                                  actions)
                 self.accumulated_import_cost += import_cost
                 self.accumulated_import_penalty += import_penalty
 
                 return import_cost, import_penalty, 0.0
 
             elif actions['ctl'] == 2:
-                export_cost, export_penalty = self.__execute_aggregator_actions__(actions)
+                export_cost, export_penalty = self.__execute_aggregator_actions__(agent,
+                                                                                  actions)
                 self.accumulated_export_cost += export_cost
                 self.accumulated_export_penalty += export_penalty
 
@@ -1057,7 +1221,7 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
             penalty += additional_penalty * abs(self.current_available_energy)
 
         # Calculate the reward
-        reward = -cost - penalty
+        reward = - cost - penalty
 
         return reward
 
@@ -1096,7 +1260,8 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
                 if self._previous_agent.name.startswith('ev'):
                     info[self._current_agent.name] = {'current': self._previous_agent.value[self.current_timestep],
                                                       'charge': self._previous_agent.charge[self.current_timestep],
-                                                      'discharge': self._previous_agent.discharge[self.current_timestep]}
+                                                      'discharge': self._previous_agent.discharge[
+                                                          self.current_timestep]}
             else:
                 info[self._current_agent.name] = {'import': self._current_agent.imports[self.current_timestep],
                                                   'export': self._current_agent.exports[self.current_timestep]}
@@ -1111,3 +1276,10 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         truncateds['__all__'] = flag
 
         return terminateds, truncateds
+
+    # Log actions
+    def _log_agents(self, agent):
+
+        self.history_dictionary[agent.name] = agent
+
+        return
