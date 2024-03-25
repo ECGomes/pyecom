@@ -5,3 +5,4 @@
 from .base_parser import BaseParser
 from .hm_parser import HMParser
 from .procsim_parser import PROCSIMParser
+from .ev4eu_cotev import CotevParser

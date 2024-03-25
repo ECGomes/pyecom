@@ -162,4 +162,4 @@ cython_debug/
 # Local notebooks used for testing
 /notebooks/old/
 /notebooks/unit_tests/
-
+/scratches/
