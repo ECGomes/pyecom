@@ -11,15 +11,14 @@ class CotevParser(BaseParser):
     def __init__(self,
                  population_path: str,
                  driving_history_path: str,
-                 assigned_segments_path: str,
-                 return_resources: bool = True):
+                 assigned_segments_path: str):
         super().__init__(population_path)
 
         self.population_path = population_path
         self.driving_history_path = driving_history_path
         self.assigned_segments_path = assigned_segments_path
 
-        self.return_resources = return_resources
+        self.resources = None
 
     def parse_driving_history(self):
         # Read the driving history CSV
@@ -86,10 +85,7 @@ class CotevParser(BaseParser):
         # Parse the assigned segments
         assigned_segments = self.parse_assigned_segments(df_grid, population)
 
-        if self.return_resources:
-            resources = self.create_resources(population, df_grid, assigned_segments)
-
-            return resources
+        self.resources = assigned_segments
 
         return
 
