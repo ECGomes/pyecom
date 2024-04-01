@@ -11,18 +11,29 @@ class CotevParser(BaseParser):
     def __init__(self,
                  population_path: str,
                  driving_history_path: str,
-                 assigned_segments_path: str):
+                 assigned_segments_path: str,
+                 parse_date_start: str = None,
+                 parse_date_end: str = None):
         super().__init__(population_path)
 
         self.population_path = population_path
         self.driving_history_path = driving_history_path
         self.assigned_segments_path = assigned_segments_path
 
+        # Save the DataFrames
+        self.assigned_segments = None
+        self.population = None
+        self.driving_history = None
+        self.trips_grid = None
+
+        self.parse_date_start = parse_date_start
+        self.parse_date_end = parse_date_end
+
         self.resources = None
 
     def parse_driving_history(self):
         # Read the driving history CSV
-        driving_history = pd.read_csv(self.driving_history_path)
+        driving_history = pd.read_csv(self.driving_history_path, parse_dates=True)
         driving_history = driving_history.transpose()
 
         # Set the first row as headers
@@ -85,32 +96,47 @@ class CotevParser(BaseParser):
         # Parse the assigned segments
         assigned_segments = self.parse_assigned_segments(df_grid, population)
 
-        self.resources = assigned_segments
-
+        # Assign everything
+        self.population = population
+        self.assigned_segments = assigned_segments
+        self.driving_history = dh
+        self.trips_grid = df_grid
+        self.resources = self.create_resources(population, df_grid, assigned_segments,
+                                               self.parse_date_start, self.parse_date_end)
         return
 
     @staticmethod
-    def create_resources(population, grid, segments):
+    def create_resources(population, grid, segments, date_start=None, date_end=None):
+
+        # Filter by start and end date
+        if date_start is not None:
+            if date_end is not None:
+                grid = grid.loc[date_start:date_end]
+                segments = segments.loc[date_start:date_end]
+            else:
+                grid = grid.loc[date_start]
+                segments = segments.loc[date_start]
+
         # Turn into a list of Vehicle objects
         resources = []
         for i in np.arange(grid.shape[1]):
             current_ev = grid.columns[i]
             vehicle = Vehicle(name='ev_{:02d}'.format(i + 1),
-                              value=grid[current_ev].shape,
+                              value=np.ones(grid[current_ev].shape) * 0.2,
                               lower_bound=np.ones(grid[current_ev].shape) * population.iloc[i]['battery_size'] * 0.0,
                               upper_bound=np.ones(grid[current_ev].shape) * population.iloc[i]['battery_size'],
                               cost=np.zeros(grid[current_ev].shape),
                               cost_discharge=np.ones(grid[current_ev].shape) * 0.05,
                               cost_charge=np.ones(grid[current_ev].shape) * 0.0,
                               capacity_max=population.iloc[i]['battery_size'],
-                              initial_charge=population.iloc[i]['battery_size'] * population.iloc[i]['soc_min'],
+                              initial_charge=population.iloc[i]['soc_min'],
                               min_charge=population.iloc[i]['battery_size'] * 0.2,
                               discharge_efficiency=0.9,
                               charge_efficiency=0.9,
-                              schedule_connected=grid[current_ev],
-                              schedule_discharge=grid[current_ev] * 7.2,
-                              schedule_charge=grid[current_ev] * 7.2,
-                              schedule_requirement_soc=segments[current_ev],
+                              schedule_connected=grid[current_ev].values,
+                              schedule_discharge=grid[current_ev].values * 7.2,
+                              schedule_charge=grid[current_ev].values * 7.2,
+                              schedule_requirement_soc=segments[current_ev].values,
                               schedule_arrival_soc=np.zeros(grid[current_ev].shape),
                               )
             resources.append(vehicle)
