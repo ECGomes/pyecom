@@ -211,10 +211,10 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         generator_observations = {}
         for gen in self.generators:
             generator_observations[gen.name] = gym.spaces.Dict({
-                'current_available_energy': gym.spaces.Box(low=-9999.0, high=9999.0, shape=(1,), dtype=np.float32),
+                'current_available_energy': gym.spaces.Box(low=-99999.0, high=99999.0, shape=(1,), dtype=np.float32),
                 'current_buy_price': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
                 'current_sell_price': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
-                'current_loads': gym.spaces.Box(low=0, high=max(self.load_consumption), shape=(1,), dtype=np.float32)
+                'current_loads': gym.spaces.Box(low=0, high=99999.0, shape=(1,), dtype=np.float32)
             })
 
         return generator_observations
@@ -258,7 +258,7 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
             # if isinstance(gen.is_renewable, bool):
             #     renewable = gen.is_renewable
 
-            if gen.is_renewable == 2.0:  # Hack for the Excel file
+            if gen.is_renewable == 2.0 or gen.is_renewable is True:  # Hack for the Excel file
                 generator_actions[gen.name] = gym.spaces.Dict({
                     'production': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32)
                 })
@@ -287,10 +287,10 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         # Check if actions has active or production
         if 'active' in actions.keys():
             produced_energy = (actions['active'] *
-                               max(gen.upper_bound))
+                               gen.upper_bound[self.current_timestep])
         elif 'production' in actions.keys():
             produced_energy = (actions['production'][0] *
-                               max(gen.upper_bound))
+                               gen.upper_bound[self.current_timestep])
 
         # Attribute the produced energy to the generator
         gen.value[self.current_timestep] = produced_energy
@@ -323,8 +323,8 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         for storage in self.storages:
             storage_observations[storage.name] = gym.spaces.Dict({
                 'current_soc': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
-                'current_available_energy': gym.spaces.Box(low=-9999.0, high=9999.0, shape=(1,), dtype=np.float32),
-                'current_loads': gym.spaces.Box(low=0, high=9999.0, shape=(1,), dtype=np.float32),
+                'current_available_energy': gym.spaces.Box(low=-99999.0, high=99999.0, shape=(1,), dtype=np.float32),
+                'current_loads': gym.spaces.Box(low=0, high=99999.0, shape=(1,), dtype=np.float32),
                 'current_buy_price': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
                 'current_sell_price': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32)
             })
@@ -494,7 +494,7 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         for ev in self.evs:
             ev_observations[ev.name] = gym.spaces.Dict({
                 'current_soc': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
-                'current_available_energy': gym.spaces.Box(low=-9999.0, high=9999.0, shape=(1,), dtype=np.float32),
+                'current_available_energy': gym.spaces.Box(low=-99999.0, high=99999.0, shape=(1,), dtype=np.float32),
                 'grid_connection': gym.spaces.Discrete(2),
                 'next_departure_time': gym.spaces.Box(low=0, high=9999, shape=(1,), dtype=np.int32),
                 'time_until_next_departure': gym.spaces.Box(low=0, high=9999, shape=(1,), dtype=np.int32),
@@ -515,7 +515,9 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         """
 
         # Get the next departure time and energy requirement
-        next_departure = np.where(ev.schedule_requirement_soc > self.current_timestep)[0]
+        next_departure = np.where(ev.schedule_requirement_soc > 0)[0]
+        next_departure = next_departure[next_departure >= self.current_timestep]
+
         remains_trips = len(next_departure) > 0
         next_departure_soc = ev.schedule_requirement_soc[next_departure[0]] \
             if remains_trips else ev.min_charge
@@ -601,23 +603,26 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
 
         # First, check if the EV is connected to the grid
         if ev.schedule_connected[self.current_timestep] == 0:
-            ev.value[self.current_timestep] = 0.0
+            # ev.value[self.current_timestep] = 0.0
             ev.charge[self.current_timestep] = 0.0
             ev.discharge[self.current_timestep] = 0.0
 
-            self.evs[idx].value[self.current_timestep] = 0.0
+            # self.evs[idx].value[self.current_timestep] = 0.0
             self.evs[idx].charge[self.current_timestep] = 0.0
             self.evs[idx].discharge[self.current_timestep] = 0.0
 
             return cost, penalty, penalty_trip
 
-        # Check if EV is arriving
-        if ev.schedule_arrival_soc[self.current_timestep] > 0.0:
-            ev.value[self.current_timestep] = (ev.schedule_arrival_soc[self.current_timestep]
-                                               / ev.capacity_max)
+        # Check if EV is arriving and there is a SOC on arrival
+        if ev.schedule_arrival_soc is not None:
+            if ev.schedule_arrival_soc[self.current_timestep] > 0.0:
+                ev.value[self.current_timestep] = (ev.schedule_arrival_soc[self.current_timestep]
+                                                   / ev.capacity_max)
 
-            self.evs[idx].value[self.current_timestep] = (ev.schedule_arrival_soc[self.current_timestep]
-                                                          / ev.capacity_max)
+                self.evs[idx].value[self.current_timestep] = (ev.schedule_arrival_soc[self.current_timestep]
+                                                              / ev.capacity_max)
+        else:
+            ev.schedule_arrival_soc[self.current_timestep] = ev.capacity_max * 0.2 # Arrives with minimum SOC
 
         # Idle state
         if actions['ctl'] == 0:
@@ -681,8 +686,8 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         self.evs[idx].discharge[self.current_timestep] = ev.discharge[self.current_timestep]
 
         # Check if the EV meets the energy requirement for the next departure
-        next_departure = np.where(ev.schedule_requirement_soc > self.current_timestep)[0]
-        remains_trips = len(next_departure) > 0
+        next_departure = np.where(ev.schedule_requirement_soc > 0)[0]
+        remains_trips = len(next_departure[next_departure > self.current_timestep]) > 0
 
         if remains_trips:
             # Check if there is a trip to be made in the current timestep
@@ -699,8 +704,10 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
                     self.evs[idx].value[self.current_timestep] = 0.0
 
                 else:
-                    ev.value[self.current_timestep] -= next_departure_soc / ev.capacity_max
-                    self.evs[idx].value[self.current_timestep] -= next_departure_soc / ev.capacity_max
+                    ev.value[self.current_timestep] = ((ev.value * ev.capacity_max - next_departure_soc) /
+                                                       ev.capacity_max)
+                    self.evs[idx].value[self.current_timestep] = ((ev.value * ev.capacity_max - next_departure_soc) /
+                                                                  ev.capacity_max)
 
         return cost, penalty, penalty_trip
 
@@ -718,7 +725,7 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
         return gym.spaces.Dict({
             'current_buy_price': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
             'current_sell_price': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
-            'current_available_energy': gym.spaces.Box(low=-9999.0, high=9999.0, shape=(1,), dtype=np.float32)
+            'current_available_energy': gym.spaces.Box(low=-99999.0, high=99999.0, shape=(1,), dtype=np.float32)
         })
 
     # Handle aggregator observations
@@ -1103,13 +1110,13 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
                     info = self._log_info()
 
                     # Check if it's the last timestep to attribute end of day storage penalties
-                    if self.current_timestep == self.generators[0].upper_bound.shape[0] - 1:
+                    # if self.current_timestep == self.generators[0].upper_bound.shape[0] - 1:
                         # Update the storage rewards according to condition
-                        for key in real_rewards.keys():
-                            if key.startswith('storage'):
+                    #    for key in real_rewards.keys():
+                    #        if key.startswith('storage'):
                                 # Update the reward according to last state constraint. Storage should have at least 50%
                                 # of its capacity at the end of the episode
-                                real_rewards[key] -= 100.0
+                    #            real_rewards[key] -= 100.0
 
                     # Update timestep
                     self.current_timestep += 1
