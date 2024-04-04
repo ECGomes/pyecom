@@ -454,7 +454,7 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
 
             # Get the cost of the energy
             # cost = discharge * storage.cost_discharge[self.current_timestep]
-            cost = storage.discharge_max[self.current_timestep] - discharge * storage.capacity_max
+            # cost = storage.discharge_max[self.current_timestep] - discharge * storage.capacity_max
 
             # Assign resource charge and discharge variables
             storage.value[self.current_timestep] -= discharge
@@ -666,7 +666,7 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
                 penalty = deviation
 
             # Calculate the cost of discharging
-            cost = discharge * ev.cost_discharge[self.current_timestep]
+            # cost = discharge * ev.cost_discharge[self.current_timestep]
 
             # Add discharged energy to the pool
             self.current_available_energy += discharge * ev.capacity_max
@@ -1209,10 +1209,10 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
             elif actions['ctl'] == 2:
                 export_cost, export_penalty = self.__execute_aggregator_actions__(agent,
                                                                                   actions)
-                self.accumulated_export_cost += export_cost
+                self.accumulated_export_cost -= export_cost
                 self.accumulated_export_penalty += export_penalty
 
-                return export_cost, export_penalty, 0.0
+                return -export_cost, export_penalty, 0.0
 
         return 0.0, 0.0, 0.0
 
