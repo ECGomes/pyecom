@@ -424,6 +424,10 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
             # Get the cost of the energy
             # cost = charge * storage.cost_charge[self.current_timestep]
 
+            # Heavily penalize the storage action if it requires importing energy
+            if self.current_available_energy - charge * storage.capacity_max < 0:
+                penalty += self.storage_action_penalty
+
             # Remove energy from the pool
             self.current_available_energy -= charge * storage.capacity_max
 
@@ -454,7 +458,7 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
 
             # Get the cost of the energy
             # cost = discharge * storage.cost_discharge[self.current_timestep]
-            # cost = storage.discharge_max[self.current_timestep] - discharge * storage.capacity_max
+            cost = storage.discharge_max[self.current_timestep] - discharge * storage.capacity_max
 
             # Assign resource charge and discharge variables
             storage.value[self.current_timestep] -= discharge
@@ -799,9 +803,9 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
             self.current_available_energy -= to_export
 
             # Update the cost of the export
-            cost = - to_export * self.aggregator.export_cost[self.current_timestep]
+            cost = to_export * self.aggregator.export_cost[self.current_timestep]
 
-            return cost, penalty
+            return -cost, penalty
 
         # Check if there is a defect of energy that needs to be imported
         if self.current_available_energy < 0:
@@ -828,68 +832,6 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
             cost = to_import * agent.import_cost[self.current_timestep]
 
             return cost, penalty
-
-        return cost, penalty
-
-        # Idle state
-        if actions['ctl'] == 0:
-
-            agent.imports[self.current_timestep] = 0.0
-            agent.exports[self.current_timestep] = 0.0
-
-            self.aggregator.imports[self.current_timestep] = 0.0
-            self.aggregator.exports[self.current_timestep] = 0.0
-
-        # Import state
-        elif actions['ctl'] == 1:
-
-            imports = actions['value'][0]
-            if imports > agent.import_max[self.current_timestep]:
-                # Calculate the deviation from the bounds
-                deviation = imports - agent.import_max[self.current_timestep]
-                imports = agent.import_max[self.current_timestep]
-                penalty = deviation * self.balance_penalty
-
-            # Calculate the cost of the imports
-            cost = imports * agent.import_cost[self.current_timestep]
-
-            # Add to the available pool
-            self.current_available_energy += imports
-
-            # Update the agent
-            agent.imports[self.current_timestep] = imports
-            agent.exports[self.current_timestep] = 0.0
-
-            # Set resource values
-            self.aggregator.imports[self.current_timestep] = imports
-            self.aggregator.exports[self.current_timestep] = 0.0
-
-            return cost, penalty
-
-        # Export state
-        elif actions['ctl'] == 2:
-            exports = actions['value'][0]
-            if exports > agent.export_max[self.current_timestep]:
-                # Calculate the deviation from the bounds
-                deviation = exports - agent.export_max[self.current_timestep]
-                exports = agent.export_max[self.current_timestep]
-                penalty = deviation
-
-            # Remove from the available pool
-            self.current_available_energy -= exports
-
-            # Get the income from the exports value
-            cost = exports * agent.export_cost[self.current_timestep]
-
-            # Update the agent
-            agent.imports[self.current_timestep] = 0.0
-            agent.exports[self.current_timestep] = exports
-
-            # Set resource values
-            self.aggregator.imports[self.current_timestep] = 0.0
-            self.aggregator.exports[self.current_timestep] = exports
-
-            return -cost, penalty
 
         return cost, penalty
 
@@ -1203,6 +1145,8 @@ class EnergyCommunitySequentialV0(MultiAgentEnv):
                                                                                   actions)
                 self.accumulated_import_cost += import_cost
                 self.accumulated_import_penalty += import_penalty
+
+                import_penalty *= self.import_penalty
 
                 return import_cost, import_penalty, 0.0
 
