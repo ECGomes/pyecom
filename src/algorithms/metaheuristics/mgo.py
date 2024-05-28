@@ -104,8 +104,22 @@ class MGO(BaseMetaheuristic):
 
         # Sort the population based on fitness
         sorted_idx = np.argsort(self.population_fitness)
-        self.population = self.population[sorted_idx, :]
-        self.population_fitness = self.population_fitness[sorted_idx]
+        self.population = self.population[sorted_idx, :][:self.pop_size]
+        self.population_fitness = np.array(self.population_fitness)[sorted_idx][:self.pop_size].tolist()
+
+        return
+
+    def update_population(self):
+        """
+        Method to run an iteration of the algorithm
+        :return: None
+        """
+
+        # Pre-update cleanup
+        self.pre_update_cleanup()
+
+        # Operator
+        self._operator()
 
         return
 
@@ -156,42 +170,44 @@ class MGO(BaseMetaheuristic):
         Operator method for the algorithm
         """
 
-        random_candidates = self.rng.permutation(np.arange(self.pop_size))[:int(self.pop_size / 3)]
+        for member in np.arange(self.pop_size):
+            random_candidates = self.rng.permutation(np.arange(self.pop_size))[:int(self.pop_size / 3)]
 
-        # Get the new candidates
-        pop_idx = self.rng.integers(low=int(self.pop_size / 3), high=self.pop_size, size=self.pop_dim)
+            # Get the new candidates
+            pop_idx = self.rng.integers(low=int(self.pop_size / 3), high=self.pop_size, size=1)
 
-        # MATLAB code does floor(rand) which ALWAYS returns 0, and ceil(rand) which ALWAYS returns 1.
-        # Simplified to just the mean
-        m = np.mean(self.population[random_candidates], axis=0)
+            # MATLAB code does floor(rand) which ALWAYS returns 0, and ceil(rand) which ALWAYS returns 1.
+            # Modified to normal distribution instead of uniform
+            m = self.population[pop_idx] * np.floor(self.rng.normal()) + \
+                np.mean(self.population[random_candidates], axis=0) * np.ceil(self.rng.normal())
 
-        # Calculate coefficients
-        coefficients = self._coefficient_vector(self.current_iteration + 1)
+            # Calculate coefficients
+            coefficients = self._coefficient_vector(self.current_iteration + 1)
 
-        # Calculate A and D vectors
-        a_vector = self.rng.normal(size=self.pop_dim) * np.exp(2 - self.current_iteration + 1 * (2 / self.n_iter))
-        d_vector = (np.abs(self.population[self.current_iteration]) + \
-                    np.abs(self.current_best)) * (2 * self.rng.uniform() - 1)
+            # Calculate A and D vectors
+            a_vector = self.rng.normal(size=self.pop_dim) * np.exp(2 - self.current_iteration + 1 * (2 / self.n_iter))
+            d_vector = (np.abs(self.population[member]) + \
+                        np.abs(self.current_best)) * (2 * self.rng.uniform() - 1)
 
-        # Update location
-        gazelles = np.zeros(shape=(4, self.pop_dim))
-        gazelles[1, :] = self.current_best - \
-                         np.abs((self.rng.integers(1, 3) * m - self.rng.integers(1, 3) * \
-                                 self.population[self.current_iteration]) * a_vector) * \
-                         coefficients[self.rng.integers(0, 4), :]
-        gazelles[2, :] = (m + coefficients[self.rng.integers(0, 4), :]) + \
-                         (self.rng.integers(1, 3) * self.current_best - self.rng.integers(1, 3) * \
-                          self.population[self.rng.integers(0, self.pop_size)]) * coefficients[self.rng.integers(0, 4), :]
-        gazelles[3, :] = self.population[self.current_iteration] - d_vector + \
-                         (self.rng.integers(1, 3) * self.current_best - self.rng.integers(1, 3) * m) * \
-                         coefficients[self.rng.integers(0, 4), :]
+            # Update location
+            gazelles = np.zeros(shape=(4, self.pop_dim))
+            gazelles[1, :] = self.current_best - \
+                             np.abs((self.rng.integers(1, 3) * m - self.rng.integers(1, 3) * \
+                                     self.population[member]) * a_vector) * \
+                             coefficients[self.rng.integers(0, 4), :]
+            gazelles[2, :] = (m + coefficients[self.rng.integers(0, 4), :]) + \
+                             (self.rng.integers(1, 3) * self.current_best - self.rng.integers(1, 3) * \
+                              self.population[self.rng.integers(0, self.pop_size)]) * coefficients[self.rng.integers(0, 4), :]
+            gazelles[3, :] = self.population[member] - d_vector + \
+                             (self.rng.integers(1, 3) * self.current_best - self.rng.integers(1, 3) * m) * \
+                             coefficients[self.rng.integers(0, 4), :]
 
-        # Boundary check
-        new_gazelles = self._boundary_check(gazelles)
+            # Boundary check
+            new_gazelles = self._boundary_check(gazelles)
 
-        # Modification: Substitute the last 4 gazelles with the new ones
-        # Since the population will be sorted later, we can simply replace the last 4 gazelles
-        self.population[-4:, :] = new_gazelles
+            self.population = np.vstack((self.population, new_gazelles))
+            for _ in np.arange(4):
+                self.population_fitness.append(np.inf)
 
         return
 
@@ -217,3 +233,22 @@ class MGO(BaseMetaheuristic):
         self.get_best()
 
         return
+
+    def check_termination(self) -> bool:
+        """
+        Method to check the stopping criteria
+        :return: True if the stopping criteria is met, False otherwise
+        """
+
+        if abs(np.sum([-self.current_best_fitness,
+                       self.population_fitness[self.current_best_idx]])) < self.epsilon_tolerance:
+            self.current_best = self.population[self.current_best_idx, :]
+            self.current_best_fitness = self.population_fitness[self.current_best_idx]
+            self.current_tolerance = 0
+        else:
+            self.current_tolerance += 1
+
+        if self.current_tolerance >= self.iter_tolerance:
+            return True
+
+        return False
