@@ -1,5 +1,4 @@
 # HyDE-DF implementation that extends the MetaheuristicsBase class
-import copy
 
 from .base_metaheuristic import BaseMetaheuristic
 
@@ -45,7 +44,7 @@ class HydeDF(BaseMetaheuristic):
         # Flag to keep population history
         self.keep_population = keep_population
 
-        # Placeholder values for best population member and it's index
+        # Placeholder values for best population member and its index
         self.current_best = None
         self.current_best_idx = None
         self.current_best_fitness = None
@@ -247,6 +246,7 @@ class HydeDF(BaseMetaheuristic):
         if self.keep_population:
             self.population_history.append(self.population)
 
+    # Post update cleanup
     def post_update_cleanup(self):
 
         # Elitism selection
@@ -259,8 +259,8 @@ class HydeDF(BaseMetaheuristic):
         self.f_weight_old[self.current_best_idx, :] = self.f_weight[self.current_best_idx, :]
         self.f_cr_old[self.current_best_idx] = self.f_cr[self.current_best_idx]
 
-    # Post update cleanup
-    def check_stopping_criteria(self) -> bool:
+    # Check stopping criteria
+    def check_termination(self) -> bool:
         """
         Method to check the stopping criteria
         :return: True if the stopping criteria is met, False otherwise
