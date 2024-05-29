@@ -1,7 +1,7 @@
 # Import algorithms
 
 from .base_algorithm import BaseAlgorithm
-from .metaheuristics import BaseMetaheuristic, HydeDF, MGO
+from .metaheuristics import BaseMetaheuristic, HydeDF, MGO, DO
 
 from .rl import EnergyCommunitySingleEnv_v0
 from .rl import EnergyCommunityMultiEnv_v0

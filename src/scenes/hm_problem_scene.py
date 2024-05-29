@@ -3,7 +3,7 @@ import numpy as np
 import tqdm as tqdm
 
 from src.scenes import BaseScene
-from src.algorithms import HydeDF, MGO
+from src.algorithms import HydeDF, MGO, DO
 from ..repairs import HMRepair
 from ..parsers import HMParser
 from ..resources import BaseResource
@@ -266,6 +266,12 @@ class HMProblemScene(BaseScene):
                             pop_size=self.algo_pop_size,
                             pop_dim=self.lower_bounds.shape[0],
                             lower_bound=self.lower_bounds, upper_bound=self.upper_bounds)
+        elif algorithm == 'do':
+            self.algo = DO(n_iter=self.algo_n_iter, iter_tolerance=self.algo_iter_tolerance,
+                           epsilon_tolerance=self.algo_epsilon_tolerance,
+                           pop_size=self.algo_pop_size,
+                           pop_dim=self.lower_bounds.shape[0],
+                           lower_bound=self.lower_bounds, upper_bound=self.upper_bounds)
         else:
             raise ValueError('Invalid algorithm choice')
 
