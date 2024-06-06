@@ -266,10 +266,13 @@ class HydeDF(BaseMetaheuristic):
         :return: True if the stopping criteria is met, False otherwise
         """
 
-        if abs(np.sum([-self.current_best_fitness,
-                       self.population_fitness[self.current_best_idx]])) < self.epsilon_tolerance:
-            self.current_best = self.population[self.current_best_idx, :]
-            self.current_best_fitness = self.population_fitness[self.current_best_idx]
+        # if abs(np.sum([-self.current_best_fitness,
+        #                self.population_fitness[self.current_best_idx]])) < self.epsilon_tolerance:
+
+        if abs(np.sum([self.current_best_fitness,
+                       -self.population_old_fitness[np.argmin(self.population_old_fitness)]])) < self.epsilon_tolerance:
+            # self.current_best = self.population[self.current_best_idx, :]
+            # self.current_best_fitness = self.population_fitness[self.current_best_idx]
             self.current_tolerance = 0
         else:
             self.current_tolerance += 1

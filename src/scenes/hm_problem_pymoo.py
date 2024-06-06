@@ -219,8 +219,6 @@ class HMProblemPymoo(Problem):
             self.objective_function(temp_solution)
             objective_function.append(self.objFn)
 
-        print(len(objective_function))
-
         out['F'] = objective_function
 
     def decode(self, x: np.ndarray) -> dict:

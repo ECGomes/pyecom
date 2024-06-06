@@ -5,8 +5,9 @@ import numpy as np
 
 class HMRepair(BaseRepair):
 
-    def __init__(self, data):
+    def __init__(self, data, parsed_data: HMParser, set_vehicles):
         self.components = data
+        self.parsed_data = parsed_data
 
         # Set the initial variables to work with
         self.__initial_variables__ = {}
@@ -20,6 +21,11 @@ class HMRepair(BaseRepair):
         self.n_v2g = self.components['evs'].value.shape[0]
 
         self._initialize_values()
+
+        # Set the vehicles to a deterministic state
+        self.set_vehicles = set_vehicles
+        if self.set_vehicles:
+            self.set_v2g(self.__initial_variables__)
 
         self.storCapCost = self.components['stor'].capital_cost
         self.v2gCapCost = self.components['evs'].capital_cost
@@ -65,6 +71,9 @@ class HMRepair(BaseRepair):
         # Clip the values
         x['pImp'] = np.clip(x['pImp'], 0, self.components['pimp'].upper_bound)
         x['pExp'] = np.clip(x['pExp'], 0, self.components['pexp'].upper_bound)
+
+        # Set exclusivity
+        x['pExp'] = x['pExp'] * (1 - x['pImp'] > 0.0)
         return
 
     def check_generators(self, x):
@@ -116,7 +125,8 @@ class HMRepair(BaseRepair):
 
         # Load ENS
         temp_vals = self.components['loads'].upper_bound - x['loadRedActPower'] - x['loadCutActPower']
-        x['loadENS'] = np.clip(temp_vals, 0, self.components['loads'].upper_bound)
+        x['loadENS'] = np.clip(x['loadENS'], 0, temp_vals)
+        x['loadENS'][x['loadENS'] < 0] = 0.0
         return
 
     def check_storage(self, x):
@@ -259,6 +269,138 @@ class HMRepair(BaseRepair):
         x['v2gChActPower'] = np.clip(x['v2gChActPower'], np.zeros(x['v2gChActPower'].shape),
                                      self.components['evs'].schedule_charge)
 
+    def set_v2g(self, x):
+
+        x['v2gDchActPower'] = np.zeros(x['v2gDchActPower'].shape)
+        x['v2gChActPower'] = np.zeros(x['v2gChActPower'].shape)
+        x['v2gEnerState'] = np.zeros(x['v2gEnerState'].shape)
+        x['EminRelaxEV'] = np.zeros(x['EminRelaxEV'].shape)
+
+        # Bound binaries
+        x['v2gDchXo'] = (x['v2gDchXo'] > 0.5).astype(int)
+        x['v2gChXo'] = (x['v2gChXo'] > 0.5).astype(int)
+
+        x['v2gDchActPower'] = (self.parsed_data.vehicle['p_charge_max'] * self.parsed_data.vehicle['schedule'].T).T
+        x['v2gChActPower'] = (self.parsed_data.vehicle['p_discharge_max'] * self.parsed_data.vehicle['schedule'].T).T
+
+        for v in np.arange(self.n_v2g):
+            isConnected = False
+            connectedTo = 0
+
+            for c in np.arange(self.parsed_data.vehicle['schedule_cs_usage'].shape[0]):
+                isConnected = True
+                if self.parsed_data.vehicle['schedule_cs_usage'][c, v, 0] > 0:
+                    x['v2gDchActPower'][v, 0] = min(x['v2gDchActPower'][v, 0],
+                                                    self.parsed_data.charging_station['p_charge_limit'][c, 0])
+                    x['v2gChActPower'][v, 0] = min(x['v2gChActPower'][v, 0],
+                                                   self.parsed_data.charging_station['p_discharge_limit'][c, 0])
+
+                    connectedTo = c
+
+                else:
+                    x['v2gDchActPower'][v, 0] = 0
+                    x['v2gChActPower'][v, 0] = 0
+
+            mask = self.parsed_data.vehicle['schedule_departure_soc'][v, :] > 0
+            temp_val = self.parsed_data.vehicle['schedule_departure_soc'][v, :][mask]
+
+            if isConnected & (len(temp_val) > 0):
+                if x['v2gEnerState'][v, 0] < temp_val[0]:
+                    next_index = next((idx for idx, val in np.ndenumerate(
+                        self.parsed_data.vehicle['schedule_departure_soc'][v, :])
+                                       if val == temp_val[0]))[0]
+                    min_tsteps = np.ceil((temp_val[0] - x['v2gEnerState'][v, 0]) / \
+                                         self.parsed_data.charging_station['p_charge_max'][connectedTo]) - 1
+
+                    if min_tsteps >= next_index:
+                        x['v2gChXo'][v, 0] = 1
+                        x['v2gDchXo'][v, 0] = 0
+
+            x['v2gChActPower'][v, 0] *= x['v2gChXo'][v, 0]
+            x['v2gDchActPower'][v, 0] *= x['v2gDchXo'][v, 0]
+
+            if self.parsed_data.vehicle['schedule'][v, 0] == 0:
+                x['v2gEnerState'][v, 0] = 0
+            elif self.parsed_data.vehicle['schedule'][v, 0] == 1:
+                x['v2gEnerState'][v, 0] = self.parsed_data.vehicle['schedule_arrival_soc'][v, 0] + \
+                                            x['v2gChActPower'][v, 0] * self.parsed_data.vehicle['charge_efficiency'][v] - \
+                                            x['v2gDchActPower'][v, 0] / self.parsed_data.vehicle['discharge_efficiency'][v]
+
+            # Fix timestep dependencies
+            for t in np.arange(1, x['v2gDchActPower'].shape[1]):
+
+                isConnected = False
+                connectedTo = 0
+
+                # Check Charging Stations
+                for c in np.arange(self.parsed_data.vehicle['schedule_cs_usage'].shape[0]):
+                    if self.parsed_data.vehicle['schedule_cs_usage'][c, v, t] > 0:
+                        x['v2gDchActPower'][v, t] = min(x['v2gDchActPower'][v, t],
+                                                        self.parsed_data.charging_station['p_charge_limit'][c, t])
+                        x['v2gChActPower'][v, t] = min(x['v2gChActPower'][v, t],
+                                                       self.parsed_data.charging_station['p_discharge_limit'][c, t])
+
+                        connectedTo = c
+                        isConnected = True
+
+                    else:
+                        x['v2gDchXo'][v, t] = 0
+                        x['v2gChXo'][v, t] = 0
+
+                # Disable charge and discharge in the same timestep
+                if x['v2gChXo'][v, t] + x['v2gDchXo'][v, t] > 1:
+                    x['v2gDchXo'][v, t] = 1 - x['v2gChXo'][v, t]
+
+                # Charge to minimum limits
+                mask = self.parsed_data.vehicle['schedule_departure_soc'][v, t:] > 0
+                temp_val = self.parsed_data.vehicle['schedule_departure_soc'][v, t:][mask]
+
+                # Check if there are any requirements for EVs
+                if isConnected & (len(temp_val) > 0):
+                    if x['v2gEnerState'][v, t-1] < temp_val[0]:
+                        next_index = next((idx for idx, val in np.ndenumerate(
+                            self.parsed_data.vehicle['schedule_departure_soc'][v, t:])
+                                           if val == temp_val[0]))[0]
+                        min_tsteps = np.ceil((temp_val[0] - x['v2gEnerState'][v, t-1]) / \
+                                             self.parsed_data.charging_station['p_charge_max'][connectedTo]) - 1
+
+                        if min_tsteps >= next_index:
+                            x['v2gChXo'][v, t] = 1
+                            x['v2gDchXo'][v, t] = 0
+
+                            if (x['v2gEnerState'][v, t-1] + x['v2gChActPower'][v, t] * \
+                                self.parsed_data.vehicle['charge_efficiency'][v]) > self.parsed_data.vehicle['e_capacity_max'][v]:
+                                x['v2gChActPower'][v, t] = (self.parsed_data.vehicle['e_capacity_max'][v] - x['v2gEnerState'][v, t-1]) / \
+                                                           self.parsed_data.vehicle['charge_efficiency'][v]
+
+                # Prevent overcharge
+                if x['v2gEnerState'][v, t-1] == self.parsed_data.vehicle['e_capacity_max'][v]:
+                    x['v2gChXo'][v, t] = 0
+
+                # Prevent discharge below minimum
+                if x['v2gEnerState'][v, t-1] == 0:
+                    x['v2gDchXo'][v, t] = 0
+
+                # Update the energy state
+                x['v2gChActPower'][v, t] *= x['v2gChXo'][v, t]
+                x['v2gDchActPower'][v, t] *= x['v2gDchXo'][v, t]
+
+                # Update battery state
+                if (self.parsed_data.vehicle['schedule'][v, t-1] == 1) & (self.parsed_data.vehicle['schedule'][v, t] == 1):
+                    x['v2gEnerState'][v, t] = x['v2gEnerState'][v, t-1] + x['v2gChActPower'][v, t] * \
+                                              self.parsed_data.vehicle['charge_efficiency'][v] - \
+                                              x['v2gDchActPower'][v, t] / self.parsed_data.vehicle['discharge_efficiency'][v]
+
+                elif (self.parsed_data.vehicle['schedule'][v, t-1] == 0) & (self.parsed_data.vehicle['schedule'][v, t] == 1):
+                    x['v2gEnerState'][v, t] = self.parsed_data.vehicle['schedule_arrival_soc'][v, t] + \
+                                              x['v2gChActPower'][v, t] * self.parsed_data.vehicle['charge_efficiency'][v] - \
+                                              x['v2gDchActPower'][v, t] / self.parsed_data.vehicle['discharge_efficiency'][v]
+
+                elif (self.parsed_data.vehicle['schedule'][v, t-1] == 1) & (self.parsed_data.vehicle['schedule'][v, t] == 0):
+                    x['v2gEnerState'][v, t] = 0
+
+        return
+
     def check_balance(self, x):
 
         # Calculate the values over time
@@ -300,7 +442,15 @@ class HMRepair(BaseRepair):
         self.check_storage(x)
 
         # Check the EVs
-        self.check_v2g(x)
+        if self.set_vehicles:
+            x['v2gDchActPower'] = self.__initial_variables__['v2gDchActPower']
+            x['v2gChActPower'] = self.__initial_variables__['v2gChActPower']
+            x['v2gEnerState'] = self.__initial_variables__['v2gEnerState']
+            x['EminRelaxEV'] = self.__initial_variables__['EminRelaxEV']
+            x['v2gDchXo'] = self.__initial_variables__['v2gDchXo']
+            x['v2gChXo'] = self.__initial_variables__['v2gChXo']
+        else:
+            self.check_v2g(x)
 
         # Check the balance
         self.check_balance(x)

@@ -45,6 +45,9 @@ class MGO(BaseMetaheuristic):
         # Current iteration value
         self.current_iteration: int = 0
 
+        # Iteration tolerance
+        self.current_tolerance: int = 0
+
     def initialize(self):
         """
         Method to initialize the algorithm
@@ -240,13 +243,16 @@ class MGO(BaseMetaheuristic):
         :return: True if the stopping criteria is met, False otherwise
         """
 
-        if abs(np.sum([-self.current_best_fitness,
-                       self.population_fitness[self.current_best_idx]])) < self.epsilon_tolerance:
-            self.current_best = self.population[self.current_best_idx, :]
-            self.current_best_fitness = self.population_fitness[self.current_best_idx]
-            self.current_tolerance = 0
+        if self.current_best_fitness < self.population_old_fitness[np.argmin(self.population_old_fitness)]:
+            if self.current_best_fitness \
+                    + self.epsilon_tolerance < self.population_old_fitness[np.argmin(self.population_old_fitness)]:
+                self.current_tolerance += 1
+
+            else:
+                self.current_tolerance = 0
+
         else:
-            self.current_tolerance += 1
+            self.current_tolerance = 0
 
         if self.current_tolerance >= self.iter_tolerance:
             return True

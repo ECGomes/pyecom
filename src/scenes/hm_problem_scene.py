@@ -1,6 +1,7 @@
 # Scenario based on Hugo Morais' community scene
 import numpy as np
 import tqdm as tqdm
+import time
 
 from src.scenes import BaseScene
 from src.algorithms import HydeDF, MGO, DO
@@ -15,7 +16,9 @@ class HMProblemScene(BaseScene):
                  n_iter=200,
                  iter_tolerance=10,
                  epsilon_tolerance=1e-6,
-                 pop_size=10):
+                 pop_size=10,
+                 deterministic_vehicles=False,
+                 initial_solution=None):
 
         # Parsed data
         self.parsed_data = hm_parser
@@ -71,7 +74,8 @@ class HMProblemScene(BaseScene):
         self.upper_bounds = None
 
         # Repair instance
-        self.hm_repair = HMRepair(self.components)
+        self.deterministic_vehicles = deterministic_vehicles
+        self.hm_repair = HMRepair(self.components, self.parsed_data, set_vehicles=deterministic_vehicles)
 
         # Reference for the algorithm instance
         self.algo = None
@@ -80,8 +84,14 @@ class HMProblemScene(BaseScene):
         self.algo_epsilon_tolerance = epsilon_tolerance
         self.algo_pop_size = pop_size
 
+        # Initial solution placeholder
+        self.initial_solution = initial_solution
+
         # Solution placeholder
         self.solution = None
+
+        # Run time placeholder
+        self.run_time = None
 
     # Encoding process
     @staticmethod
@@ -259,7 +269,7 @@ class HMProblemScene(BaseScene):
                                pop_size=self.algo_pop_size,
                                pop_dim=self.lower_bounds.shape[0],
                                lower_bound=self.lower_bounds, upper_bound=self.upper_bounds,
-                               f_weight=0.5, f_cr=0.9)
+                               f_weight=0.5, f_cr=0.3)
         elif algorithm == 'mgo':
             self.algo = MGO(n_iter=self.algo_n_iter, iter_tolerance=self.algo_iter_tolerance,
                             epsilon_tolerance=self.algo_epsilon_tolerance,
@@ -275,7 +285,13 @@ class HMProblemScene(BaseScene):
         else:
             raise ValueError('Invalid algorithm choice')
 
+        timer_start = time.time()
+
         self.algo.initialize()  # Generates the initial population
+
+        # If an initial solution is provided, set it as the first member of the population
+        if self.initial_solution is not None:
+            self.algo.population[0] = self.encode(self.initial_solution)
 
         # Evaluate the initial population
         # Requires a decoding and initial fix
@@ -342,5 +358,9 @@ class HMProblemScene(BaseScene):
             # Check for stopping criteria
             if self.algo.check_termination():
                 break
+
+        timer_end = time.time()
+
+        self.run_time = timer_end - timer_start
 
         return
