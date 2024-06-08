@@ -79,6 +79,9 @@ class HMRepairPymoo(Repair):
         # Set the excess power to 0 and fix from there
         x['genExcActPower'] = np.zeros(x['genExcActPower'].shape)
 
+        # GenXo
+        x['genXo'] = (x['genXo'] > 0.5).astype(int)
+
         # Generator types
         # Type 1 (non-renewable)
         mask = self.components.generator['type_generator'] == np.ones(self.components.generator['type_generator'].shape)
@@ -429,7 +432,7 @@ class HMRepairPymoo(Repair):
                 temp_z['v2gChActPower'] = self.__initial_variables__['v2gChActPower']
                 temp_z['v2gDchXo'] = self.__initial_variables__['v2gDchXo']
                 temp_z['v2gChXo'] = self.__initial_variables__['v2gChXo']
-                temp_z['v2gEnergyState'] = self.__initial_variables__['v2gEnergyState']
+                temp_z['v2gEnerState'] = self.__initial_variables__['v2gEnerState']
                 temp_z['EminRelaxEV'] = self.__initial_variables__['EminRelaxEV']
 
             self.check_balance(temp_z)
