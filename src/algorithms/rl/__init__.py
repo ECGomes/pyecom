@@ -12,4 +12,6 @@ from .ec_multiagent_evs_v4 import EVMultiAgent_v4
 
 from .ec_multiagent_sequential_v0 import EnergyCommunitySequentialV0
 
+from .ec_multiagent_baseline_v0 import EnergyCommunityBaselineV0
+
 from .utils import *
