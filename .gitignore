@@ -163,3 +163,7 @@ cython_debug/
 /notebooks/old/
 /notebooks/unit_tests/
 /scratches/
+
+/models/
+/notebooks/seq_paper/
+/notebooks/local_tests/

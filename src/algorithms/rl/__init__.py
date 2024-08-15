@@ -11,5 +11,13 @@ from .ec_multiagent_evs_v3 import EVMultiAgent_v3
 from .ec_multiagent_evs_v4 import EVMultiAgent_v4
 
 from .ec_multiagent_sequential_v0 import EnergyCommunitySequentialV0
+from .ec_multiagent_sequential_v1 import EnergyCommunitySequentialV1
+from .ec_multiagent_sequential_v2 import EnergyCommunitySequentialV2
+from .ec_multiagent_sequential_v3 import EnergyCommunitySequentialV3
+from .ec_multiagent_sequential_v4 import EnergyCommunitySequentialV4
+
+from .ec_multiagent_baseline_v0 import EnergyCommunityBaselineV0
+from .ec_multiagent_baseline_v1 import EnergyCommunityBaselineV1
+from .ec_multiagent_baseline_v2 import EnergyCommunityBaselineV2
 
 from .utils import *

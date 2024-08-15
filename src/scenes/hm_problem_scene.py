@@ -1,9 +1,10 @@
 # Scenario based on Hugo Morais' community scene
 import numpy as np
 import tqdm as tqdm
+import time
 
 from src.scenes import BaseScene
-from src.algorithms import HydeDF
+from src.algorithms import HydeDF, MGO, DO
 from ..repairs import HMRepair
 from ..parsers import HMParser
 from ..resources import BaseResource
@@ -15,7 +16,9 @@ class HMProblemScene(BaseScene):
                  n_iter=200,
                  iter_tolerance=10,
                  epsilon_tolerance=1e-6,
-                 pop_size=10):
+                 pop_size=10,
+                 deterministic_vehicles=False,
+                 initial_solution=None):
 
         # Parsed data
         self.parsed_data = hm_parser
@@ -71,7 +74,8 @@ class HMProblemScene(BaseScene):
         self.upper_bounds = None
 
         # Repair instance
-        self.hm_repair = HMRepair(self.components)
+        self.deterministic_vehicles = deterministic_vehicles
+        self.hm_repair = HMRepair(self.components, self.parsed_data, set_vehicles=deterministic_vehicles)
 
         # Reference for the algorithm instance
         self.algo = None
@@ -80,8 +84,14 @@ class HMProblemScene(BaseScene):
         self.algo_epsilon_tolerance = epsilon_tolerance
         self.algo_pop_size = pop_size
 
+        # Initial solution placeholder
+        self.initial_solution = initial_solution
+
         # Solution placeholder
         self.solution = None
+
+        # Run time placeholder
+        self.run_time = None
 
     # Encoding process
     @staticmethod
@@ -222,36 +232,17 @@ class HMProblemScene(BaseScene):
                              x['loadCutActPower'] * self.components['loads'].cost_cut +
                              x['loadENS'] * self.components['loads'].cost_ens])
 
-        # temp_stor: float = sum([self.components['stor'].capital_cost[s] *
-        #                       (x['storEnerState'][s, t] / self.components['stor'].capacity_max[s] - 0.63) ** 2 +
-        #                        x['storDchActPower'][s, t] * self.components['stor'].cost_discharge[s, t] +
-        #                        x['storChActPower'][s, t] * self.components['stor'].cost_charge[s, t] +
-        #                        6.5e-3 / self.components['stor'].capacity_max[s] * x['storChActPower'][
-        #                            s, t] ** 2
-        #                        for t in t_range for s in stor_range])
-
         temp_stor: np.ndarray = np.sum([self.stor_capital_cost *
                                        (x['storEnerState'] / self.stor_capacity_max - 0.63) ** 2 +
                                        x['storDchActPower'] * self.components['stor'].cost_discharge +
                                        x['storChActPower'] * self.components['stor'].cost_charge +
                                        6.5e-3 / self.stor_capacity_max * x['storChActPower'] ** 2])
 
-        # temp_v2g: float = sum([self.components['evs'].capital_cost[v] *
-        #                       (x['v2gEnerState'][v, t] / self.components['evs'].capacity_max[v] - 0.63) ** 2 +
-        #                       x['v2gDchActPower'][v, t] * self.components['evs'].cost_discharge[v] +
-        #                       x['v2gChActPower'][v, t] * self.components['evs'].cost_charge[v] +
-        #                       6.5e-3 / self.components['evs'].capacity_max[v] * x['v2gChActPower'][v, t] ** 2
-        #                       for t in t_range for v in v2g_range])
-
         temp_v2g: np.ndarray = np.sum([self.v2g_capital_cost *
                                        (x['v2gEnerState'] / self.v2g_capacity_max - 0.63) ** 2 +
                                        x['v2gDchActPower'] * self.v2g_discharge_cost +
                                        x['v2gChActPower'] * self.v2g_charge_cost +
                                        6.5e-3 / self.v2g_capacity_max * x['v2gChActPower'] ** 2])
-
-        # temp_rest: float = sum([x['pImp'][t] * self.components['pimp'].cost[t] +
-        #                         x['pExp'][t] * self.components['pexp'].cost[t]
-        #                         for t in t_range])
 
         temp_rest: np.ndarray = np.sum([x['pImp'] * self.components['pimp'].cost +
                                        x['pExp'] * self.components['pexp'].cost])
@@ -260,16 +251,47 @@ class HMProblemScene(BaseScene):
 
         return obj_fn
 
-    def run(self):
+    def run(self, algorithm: str = 'hyde_df'):
+        """
+        Run the algorithm on the problem.
+        Accepted algorithms are:
+        - 'hyde_df'
+        - 'mgo'
+        :param algorithm: Algorithm to run on the problem
+        :return: None
+        """
 
-        # Initialize the algorithm
-        self.algo = HydeDF(n_iter=self.algo_n_iter, iter_tolerance=self.algo_iter_tolerance,
+        # Check algorithm choice
+        if algorithm == 'hyde_df':
+            # Initialize the algorithm
+            self.algo = HydeDF(n_iter=self.algo_n_iter, iter_tolerance=self.algo_iter_tolerance,
+                               epsilon_tolerance=self.algo_epsilon_tolerance,
+                               pop_size=self.algo_pop_size,
+                               pop_dim=self.lower_bounds.shape[0],
+                               lower_bound=self.lower_bounds, upper_bound=self.upper_bounds,
+                               f_weight=0.5, f_cr=0.3)
+        elif algorithm == 'mgo':
+            self.algo = MGO(n_iter=self.algo_n_iter, iter_tolerance=self.algo_iter_tolerance,
+                            epsilon_tolerance=self.algo_epsilon_tolerance,
+                            pop_size=self.algo_pop_size,
+                            pop_dim=self.lower_bounds.shape[0],
+                            lower_bound=self.lower_bounds, upper_bound=self.upper_bounds)
+        elif algorithm == 'do':
+            self.algo = DO(n_iter=self.algo_n_iter, iter_tolerance=self.algo_iter_tolerance,
                            epsilon_tolerance=self.algo_epsilon_tolerance,
                            pop_size=self.algo_pop_size,
                            pop_dim=self.lower_bounds.shape[0],
-                           lower_bound=self.lower_bounds, upper_bound=self.upper_bounds,
-                           f_weight=0.5, f_cr=0.9)
+                           lower_bound=self.lower_bounds, upper_bound=self.upper_bounds)
+        else:
+            raise ValueError('Invalid algorithm choice')
+
+        timer_start = time.time()
+
         self.algo.initialize()  # Generates the initial population
+
+        # If an initial solution is provided, set it as the first member of the population
+        if self.initial_solution is not None:
+            self.algo.population[0] = self.encode(self.initial_solution)
 
         # Evaluate the initial population
         # Requires a decoding and initial fix
@@ -334,7 +356,11 @@ class HMProblemScene(BaseScene):
             self.algo.post_update_cleanup()
 
             # Check for stopping criteria
-            if self.algo.check_stopping_criteria():
+            if self.algo.check_termination():
                 break
+
+        timer_end = time.time()
+
+        self.run_time = timer_end - timer_start
 
         return
