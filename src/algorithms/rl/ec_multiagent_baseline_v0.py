@@ -39,7 +39,6 @@ class EnergyCommunityBaselineV0(MultiAgentEnv):
                  evs: list[Vehicle],
                  generators: list[Generator],
                  aggregator: Aggregator,
-                 execution_order: list[str],
                  ev_penalty: float = 1.0,
                  balance_penalty: float = 1.0,
                  ):
@@ -54,7 +53,7 @@ class EnergyCommunityBaselineV0(MultiAgentEnv):
                                    'aggregator': aggregator}
 
         # Initialize the environment
-        self._reset(ren_generators, loads, storages, evs, generators, aggregator, execution_order)
+        self._reset(ren_generators, loads, storages, evs, generators, aggregator)
 
         # Possible penalties
         self.ev_penalty = ev_penalty
@@ -74,8 +73,7 @@ class EnergyCommunityBaselineV0(MultiAgentEnv):
                storages: list[Storage],
                evs: list[Vehicle],
                generators: list[Generator],
-               aggregator: Aggregator,
-               execution_order: list[str]):
+               aggregator: Aggregator):
 
         # Define the resources
         self.resources = deepcopy(self.original_resources)
@@ -86,10 +84,6 @@ class EnergyCommunityBaselineV0(MultiAgentEnv):
         self.evs = self.resources['evs']
         self.generators = self.resources['generators']
         self.aggregator = self.resources['aggregator']
-
-        # Define the execution order
-        self.execution_order = execution_order
-        self.executed_agents = [False for _ in range(len(self.execution_order))]
 
         # Sum of loads
         self.load_consumption: float = np.sum([load.value for load in self.loads], axis=0)
@@ -107,10 +101,6 @@ class EnergyCommunityBaselineV0(MultiAgentEnv):
         self._agent_ids = set(self.agents)
         self.terminateds = set()
         self.truncateds = set()
-
-        # Agent execution variables
-        self._current_agent_idx: int = 0
-        self._previous_agent_idx: int = 0
 
     # Create agents
     def __create_agents__(self) -> dict:
@@ -900,8 +890,7 @@ class EnergyCommunityBaselineV0(MultiAgentEnv):
                     storages=self.resources['storages'],
                     evs=self.resources['evs'],
                     generators=self.resources['generators'],
-                    aggregator=self.resources['aggregator'],
-                    execution_order=self.execution_order)
+                    aggregator=self.resources['aggregator'])
 
         observations = self._get_observations()
 
@@ -921,6 +910,11 @@ class EnergyCommunityBaselineV0(MultiAgentEnv):
 
         # Truncations and terminations
         terminateds, truncateds = self._log_ending(False)
+
+        # Check for episode end
+        if self.timestep == self.loads[0].value.shape[0] - 1:
+            terminateds, truncateds = self._log_ending(True)
+            return {}, reward, terminateds, truncateds, {}
 
         # Check for actions
         if len(action_dict) > 0:
@@ -1021,4 +1015,4 @@ class EnergyCommunityBaselineV0(MultiAgentEnv):
     def _log_info(self) -> dict:
 
         # Check if there are keys on the reward
-        return {'{}'.format(self.execution_order[self._current_agent_idx]): {}}
+        return {'': {}}
