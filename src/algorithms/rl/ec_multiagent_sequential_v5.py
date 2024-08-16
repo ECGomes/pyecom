@@ -7,7 +7,7 @@ from ray.rllib.env.multi_agent_env import MultiAgentEnv
 from src.resources import Generator, Load, Storage, Vehicle, Aggregator
 
 
-class EnergyCommunitySequentialV4(MultiAgentEnv):
+class EnergyCommunitySequentialV5(MultiAgentEnv):
     """
     Energy Community Environment for multi-agent reinforcement learning
     Generators can be renewable or non-renewable:
@@ -107,6 +107,7 @@ class EnergyCommunitySequentialV4(MultiAgentEnv):
 
         # Available overall and renewable energy for current timestep
         self.available_energy: float = -self.load_consumption[self.timestep]
+        self.available_ren_energy: float = 0.0
 
         # Create the agents
         self.possible_agents = ['ren_gen', 'storage', 'ev', 'gen']
@@ -213,9 +214,9 @@ class EnergyCommunitySequentialV4(MultiAgentEnv):
             ren_gen_obs[gen.name] = gym.spaces.Dict({
                 'available_energy': gym.spaces.Box(low=-99999.0, high=99999.0, shape=(1,), dtype=np.float32),
                 'expected_production': gym.spaces.Box(low=0, high=99999.0, shape=(1,), dtype=np.float32),
-                'production_cost': gym.spaces.Box(low=0, high=1.0, shape=(1, ), dtype=np.float32),
                 'import_price': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
                 'export_price': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
+                'time_of_day': gym.spaces.Box(low=0, high=23, shape=(1,), dtype=np.int32)
             })
 
         return ren_gen_obs
@@ -233,12 +234,12 @@ class EnergyCommunitySequentialV4(MultiAgentEnv):
                                          dtype=np.float32),
             'expected_production': np.array([gen.upper_bound[self.timestep]],
                                             dtype=np.float32),
-            'production_cost': np.array([gen.cost[self.timestep]],
-                                        dtype=np.float32),
             'import_price': np.array([self.aggregator.import_cost[self.timestep]],
                                      dtype=np.float32),
             'export_price': np.array([self.aggregator.export_cost[self.timestep]],
-                                     dtype=np.float32)
+                                     dtype=np.float32),
+            'time_of_day': np.array([self.timestep % 24],
+                                    dtype=np.int32)
         }
 
         return generator_observations
@@ -275,16 +276,32 @@ class EnergyCommunitySequentialV4(MultiAgentEnv):
 
         cost = production * gen.cost[self.timestep]
 
-        # If there is available energy, attribute to the available renewable pool
-        self.available_energy += production
+        # Check if we have surplus to attribute to a clean renewable pool
+        if self.available_energy < 0:
+            # Check if we provide more than necessary for the loads
+            if production > abs(self.available_energy):
+                # Calculate the surplus
+                surplus = production - abs(self.available_energy)
+
+                # Update the available renewable energy
+                self.available_ren_energy += surplus
+                self.available_energy += production
+
+            else:
+                # Update the available energy pool
+                self.available_energy += production
+                self.available_ren_energy = 0.0
+
+        else:
+            self.available_energy += production
+            self.available_ren_energy += production
 
         # Set the production values on the resources
         idx = [i for i in range(len(self.ren_generators)) if self.ren_generators[i].name == gen.name][0]
         gen.value[self.timestep] = production
         self.ren_generators[idx].value[self.timestep] = production
 
-        return abs(cost), abs(penalty)
-        # return - production_coefficient, abs(penalty)
+        return -production_coefficient, abs(penalty)
 
     # Create Storage Observation Space
     def __create_storage_obs__(self) -> dict:
@@ -302,10 +319,12 @@ class EnergyCommunitySequentialV4(MultiAgentEnv):
             storage_observations[storage.name] = gym.spaces.Dict({
                 'soc': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
                 'available_energy': gym.spaces.Box(low=-99999.0, high=99999.0, shape=(1,), dtype=np.float32),
+                'available_renewable_energy': gym.spaces.Box(low=0.0, high=99999.0, shape=(1,), dtype=np.float32),
                 'maximum_charge': gym.spaces.Box(low=0, high=99999.0, shape=(1,), dtype=np.float32),
                 'maximum_discharge': gym.spaces.Box(low=0, high=99999.0, shape=(1,), dtype=np.float32),
                 'import_price': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
-                'export_price': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32)
+                'export_price': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
+                'time_of_day': gym.spaces.Box(low=0, high=23, shape=(1,), dtype=np.int32)
             })
 
         return storage_observations
@@ -324,6 +343,8 @@ class EnergyCommunitySequentialV4(MultiAgentEnv):
                             dtype=np.float32),
             'available_energy': np.array([self.available_energy],
                                          dtype=np.float32),
+            'available_renewable_energy': np.array([self.available_ren_energy],
+                                                   dtype=np.float32),
             'maximum_charge': np.array([storage.charge_max[self.timestep]],
                                        dtype=np.float32),
             'maximum_discharge': np.array([storage.discharge_max[self.timestep]],
@@ -331,7 +352,9 @@ class EnergyCommunitySequentialV4(MultiAgentEnv):
             'import_price': np.array([self.aggregator.import_cost[self.timestep]],
                                      dtype=np.float32),
             'export_price': np.array([self.aggregator.export_cost[self.timestep]],
-                                     dtype=np.float32)
+                                     dtype=np.float32),
+            'time_of_day': np.array([self.timestep % 24],
+                                    dtype=np.int32)
         }
 
         return storage_observations
@@ -417,11 +440,41 @@ class EnergyCommunitySequentialV4(MultiAgentEnv):
                 to_charge = (0.9 - storage.value[self.timestep]) * storage.capacity_max
                 charge = to_charge / storage.charge_max[self.timestep]
 
-            # The cost is the charge * cost_charge, as efficiency should not be considered
-            cost = to_charge * storage.cost_charge[self.timestep]
+            # Check energy balance
+            if self.available_energy <= 0:
+                # As this is formulated, if available energy is negative, there is no renewable energy available.
+                # In this case, we can only charge from the grid and just add the cost.
+                # The cost is the charge * (cost_charge + import_price), as efficiency should not be considered
+                cost = to_charge * (storage.cost_charge[self.timestep] + self.aggregator.import_cost[self.timestep])
 
-            # Update the available energy
-            self.available_energy -= to_charge
+                # Update the available energy
+                self.available_energy -= to_charge
+
+            else:
+                # Check if we can charge from renewable energy
+                if self.available_ren_energy > 0:
+                    # Check if we can charge from renewable energy
+                    if to_charge > self.available_ren_energy:
+                        # If we cannot charge, charge the maximum possible from renewable energy
+                        # And use the rest from other sources.
+                        # We'll consider that there are no further efficiency losses
+                        ren_charge = self.available_ren_energy
+
+                        # Calculate the cost
+                        cost = abs(to_charge - ren_charge) \
+                               * (storage.cost_charge[self.timestep] + self.aggregator.import_cost[self.timestep])
+
+                        # Update the available energy
+                        self.available_energy -= to_charge
+                        self.available_ren_energy = 0.0
+
+                    else:
+                        # Charge from renewable energy
+                        cost = to_charge * storage.cost_charge[self.timestep]
+
+                        # Update the available energy
+                        self.available_energy -= to_charge
+                        self.available_ren_energy -= to_charge
 
         # Discharge state
         elif actions['ctl'] == 2:
