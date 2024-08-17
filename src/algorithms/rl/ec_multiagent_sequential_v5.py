@@ -38,7 +38,7 @@ class EnergyCommunitySequentialV5(MultiAgentEnv):
     Removed the available renewable energy from the observation space
     """
 
-    metadata = {'name': 'EnergyCommunitySequential-v4'}
+    metadata = {'name': 'EnergyCommunitySequential-v5'}
 
     def __init__(self,
                  ren_generators: list[Generator],
@@ -274,7 +274,7 @@ class EnergyCommunitySequentialV5(MultiAgentEnv):
         production_coefficient: float = np.round(actions['production'][0], 1)
         production: float = production_coefficient * gen.upper_bound[self.timestep]
 
-        cost = production * gen.cost[self.timestep]
+        # cost = production * gen.cost[self.timestep]
 
         # Check if we have surplus to attribute to a clean renewable pool
         if self.available_energy < 0:
@@ -470,7 +470,9 @@ class EnergyCommunitySequentialV5(MultiAgentEnv):
 
                     else:
                         # Charge from renewable energy
-                        cost = to_charge * storage.cost_charge[self.timestep]
+                        # cost = to_charge * storage.cost_charge[self.timestep]
+                        cost = to_charge * \
+                               (storage.cost_charge[self.timestep] - self.aggregator.import_cost[self.timestep])
 
                         # Update the available energy
                         self.available_energy -= to_charge
@@ -513,7 +515,7 @@ class EnergyCommunitySequentialV5(MultiAgentEnv):
         self.storages[idx].charge[self.timestep] = to_charge * storage.charge_efficiency
         self.storages[idx].discharge[self.timestep] = to_discharge / storage.discharge_efficiency
 
-        return abs(cost), abs(penalty)
+        return cost, abs(penalty)
 
     # Create EV Observation Space
     def __create_ev_obs__(self) -> dict:
@@ -1032,13 +1034,13 @@ class EnergyCommunitySequentialV5(MultiAgentEnv):
                     aggregator_cost, aggregator_penalty = self.__execute_aggregator__()
 
                     # Split the aggregator costs
-                    split_agg_cost = aggregator_cost / len(self.agents)
+                    # split_agg_cost = aggregator_cost / len(self.agents)
 
                     # Create a reward dictionary with all agents
                     for _ag in self.agents:
                         reward[_ag] = 0.0 if _ag not in reward else reward[_ag]
-                        reward[_ag] = reward[_ag] - split_agg_cost - abs(aggregator_penalty)
-                        # reward[_ag] = reward[_ag] - aggregator_cost - abs(aggregator_penalty)
+                        # reward[_ag] = reward[_ag] - split_agg_cost - abs(aggregator_penalty)
+                        reward[_ag] = reward[_ag] - aggregator_cost - abs(aggregator_penalty)
 
                     # Calculate the reward for the aggregator
                     # reward[agent_name] = - aggregator_cost - aggregator_penalty
