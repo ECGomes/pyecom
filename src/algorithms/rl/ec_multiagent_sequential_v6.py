@@ -7,7 +7,7 @@ from ray.rllib.env.multi_agent_env import MultiAgentEnv
 from src.resources import Generator, Load, Storage, Vehicle, Aggregator
 
 
-class EnergyCommunitySequentialV5(MultiAgentEnv):
+class EnergyCommunitySequentialV6(MultiAgentEnv):
     """
     Energy Community Environment for multi-agent reinforcement learning
     Generators can be renewable or non-renewable:
@@ -69,6 +69,10 @@ class EnergyCommunitySequentialV5(MultiAgentEnv):
         self.storage_penalty = storage_penalty
         self.ev_penalty = ev_penalty
         self.balance_penalty = balance_penalty
+
+        # Possible storage action vector
+        self.ren_gen_actions = np.round(np.arange(0.0, 1.0, 0.1), 1)
+        self.battery_actions = np.round(np.arange(-1.0, 1.0, 0.1), 1)
 
         # Handle observation and action spaces
         self._handle_observation_space()
@@ -255,7 +259,7 @@ class EnergyCommunitySequentialV5(MultiAgentEnv):
         generator_actions = {}
         for gen in self.ren_generators:
             generator_actions[gen.name] = gym.spaces.Dict({
-                'production': gym.spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32)
+                'production': gym.spaces.Discrete(self.ren_gen_actions.shape[0])
             })
 
         return generator_actions
@@ -273,7 +277,7 @@ class EnergyCommunitySequentialV5(MultiAgentEnv):
         cost: float = 0.0
         penalty: float = 0.0
 
-        production_coefficient: float = np.round(actions['production'][0], 1)
+        production_coefficient: float = self.ren_gen_actions[actions['production']]
         production: float = production_coefficient * gen.upper_bound[self.timestep]
 
         # cost = production * gen.cost[self.timestep]
@@ -303,7 +307,7 @@ class EnergyCommunitySequentialV5(MultiAgentEnv):
         gen.value[self.timestep] = production
         self.ren_generators[idx].value[self.timestep] = production
 
-        return -production_coefficient, abs(penalty)
+        return -production_coefficient, penalty
 
     # Create Storage Observation Space
     def __create_storage_obs__(self) -> dict:
@@ -367,17 +371,17 @@ class EnergyCommunitySequentialV5(MultiAgentEnv):
         """
         Create the action space for the storages
         Will have the following actions:
-        - ctl: control the storage (bool) -> 0/1/2 for none/charge/discharge
-        - value: value to be charged or discharged (float)
+        - ctl: discrete values corresponding to the percentage of charge/discharge
+        [-1.0, -0.9, -0.8, ..., 0.0, ..., 0.8, 0.9, 1.0]
+        a total of 21 actions
         :return: dict
         """
+
 
         storage_actions = {}
         for storage in self.storages:
             storage_actions[storage.name] = gym.spaces.Dict({
-                'ctl': gym.spaces.Discrete(3),
-                'value': gym.spaces.Box(low=0.1, high=1.0, shape=(1,), dtype=np.float32)
-            })
+                'ctl': gym.spaces.Discrete(self.battery_actions.shape[0])})
 
         return storage_actions
 
@@ -411,8 +415,10 @@ class EnergyCommunitySequentialV5(MultiAgentEnv):
             storage.value[self.timestep] = storage.value[self.timestep - 1]
             self.storages[idx].value[self.timestep] = storage.value[self.timestep - 1]
 
+        storage_action = self.battery_actions[actions['ctl']]
+
         # Idle state
-        if actions['ctl'] == 0:
+        if storage_action == 0.0:
             storage.charge[self.timestep] = 0.0
             storage.discharge[self.timestep] = 0.0
 
@@ -431,14 +437,14 @@ class EnergyCommunitySequentialV5(MultiAgentEnv):
                     # If the storage has been charged, check if it is still charged
                     pass
                 else:
-                    penalty = self.storage_penalty
+                    penalty += self.storage_penalty
 
             return cost, penalty
 
         # Charge state
-        elif actions['ctl'] == 1:
+        elif storage_action > 0.0:
             # Check if we can charge
-            charge: float = actions['value'][0]
+            charge: float = storage_action
             to_charge: float = charge * storage.charge_max[self.timestep]
 
             # Check if we can charge
@@ -458,6 +464,8 @@ class EnergyCommunitySequentialV5(MultiAgentEnv):
                 # In this case, we can only charge from the grid and just add the cost.
                 # The cost is the charge * (cost_charge + import_price), as efficiency should not be considered
                 cost = to_charge * (storage.cost_charge[self.timestep] + self.aggregator.import_cost[self.timestep])
+
+                penalty = self.storage_penalty
 
                 # Update the available energy
                 self.available_energy -= to_charge
@@ -487,16 +495,16 @@ class EnergyCommunitySequentialV5(MultiAgentEnv):
                         cost = to_charge * \
                                (storage.cost_charge[self.timestep] - self.aggregator.import_cost[self.timestep])
 
-                        cost = cost**2
+                        penalty = -self.storage_penalty
 
                         # Update the available energy
                         self.available_energy -= to_charge
                         self.available_ren_energy -= to_charge
 
         # Discharge state
-        elif actions['ctl'] == 2:
+        elif actions['ctl'] < 0.0:
 
-            discharge: float = actions['value'][0]
+            discharge: float = abs(storage_action)
             to_discharge: float = discharge * storage.discharge_max[self.timestep]
 
             # Check if we can discharge
@@ -516,17 +524,23 @@ class EnergyCommunitySequentialV5(MultiAgentEnv):
                 # We are discharging to sell
                 cost = to_discharge * (storage.cost_discharge[self.timestep]) # - self.aggregator.export_cost[self.timestep])
 
+                # Add penalty; we want to discharge only when we don't have energy
+                # penalty = self.storage_penalty
+
             else:
                 # Separate the costs and earning according to energy pool satisfaction
                 if self.available_energy + to_discharge > 0:
                     # We are discharging to save up to certain point
                     surplus = to_discharge - abs(self.available_energy)
                     cost = (to_discharge - surplus) * \
-                           (storage.cost_discharge[self.timestep] - self.aggregator.import_cost[self.timestep])# + \
+                           (storage.cost_discharge[self.timestep])# - self.aggregator.import_cost[self.timestep])# + \
                             #surplus * (storage.cost_discharge[self.timestep] - self.aggregator.export_cost[self.timestep])
                 else:
                     # We are discharging to save
                     cost = to_discharge * (storage.cost_discharge[self.timestep] - self.aggregator.import_cost[self.timestep])
+
+                    # Add a negative penalty; we want to discharge only when we don't have energy
+                    penalty = -self.storage_penalty
 
             # Update the available energy
             self.available_energy += to_discharge / storage.discharge_efficiency
@@ -547,7 +561,7 @@ class EnergyCommunitySequentialV5(MultiAgentEnv):
         self.storages[idx].charge[self.timestep] = to_charge * storage.charge_efficiency
         self.storages[idx].discharge[self.timestep] = to_discharge / storage.discharge_efficiency
 
-        return cost, abs(penalty)
+        return cost, penalty
 
     # Create EV Observation Space
     def __create_ev_obs__(self) -> dict:
@@ -952,7 +966,7 @@ class EnergyCommunitySequentialV5(MultiAgentEnv):
                 penalty = self.balance_penalty
 
             # Calculate the cost
-            cost = np.round(abs(energy_to_export * self.aggregator.export_cost[self.timestep]), 4)
+            cost = - np.round(abs(energy_to_export * self.aggregator.export_cost[self.timestep]), 4)
             # cost = - (cost**2)
 
         elif self.available_energy < 0.0:
@@ -1048,7 +1062,8 @@ class EnergyCommunitySequentialV5(MultiAgentEnv):
                     cost, penalty = self.__execute_ren_gen_actions__(current_res, actions)
 
                 # Calculate the reward
-                reward[agent_name] = - np.round(cost, 4) - np.round(penalty, 4)
+                # reward[agent_name] = - np.round(cost, 4) - np.round(penalty, 4)
+                reward[agent_name] = - penalty
 
                 # Update the agent execution
                 self.executed_agents[self._current_agent_idx] = True
