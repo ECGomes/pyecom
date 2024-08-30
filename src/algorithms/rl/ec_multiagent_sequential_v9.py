@@ -73,6 +73,7 @@ class EnergyCommunitySequentialV9(MultiAgentEnv):
         self.ren_gen_actions = np.round(np.arange(0.0, 1.0, 0.1), 1)
         self.battery_actions = np.round(np.arange(-1.0, 1.0, 0.1), 1)
         self.ev_actions = np.round(np.arange(-1.0, 1.0, 0.1), 1)
+        self.gen_actions = np.round(np.arange(0.0, 1.0, 0.1), 1)
 
         # Handle observation and action spaces
         self._handle_observation_space()
@@ -1026,7 +1027,8 @@ class EnergyCommunitySequentialV9(MultiAgentEnv):
                 'max_production': gym.spaces.Box(low=0, high=99999.0, shape=(1,), dtype=np.float32),
                 'cost_production': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
                 'import_price': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
-                'export_price': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32)
+                'export_price': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
+                'time_of_day': gym.spaces.Box(low=0, high=23, shape=(1,), dtype=np.int32)
             })
 
         return generator_observations
@@ -1048,7 +1050,9 @@ class EnergyCommunitySequentialV9(MultiAgentEnv):
             'import_price': np.array([self.aggregator.import_cost[self.timestep]],
                                      dtype=np.float32),
             'export_price': np.array([self.aggregator.export_cost[self.timestep]],
-                                     dtype=np.float32)
+                                     dtype=np.float32),
+            'time_of_day': np.array([self.timestep % 24],
+                                    dtype=np.int32)
         }
 
         return generator_observations
@@ -1061,9 +1065,7 @@ class EnergyCommunitySequentialV9(MultiAgentEnv):
 
         generator_actions = {}
         for gen in self.generators:
-            generator_actions[gen.name] = gym.spaces.Dict({
-                'active': gym.spaces.Discrete(2)
-            })
+            generator_actions[gen.name] = gym.spaces.Discrete(self.gen_actions.shape[0])
 
         return generator_actions
 
@@ -1079,7 +1081,8 @@ class EnergyCommunitySequentialV9(MultiAgentEnv):
         penalty: float = 0.0
 
         # Calculate production and production costs
-        production = actions['active'] * gen.upper_bound[self.timestep]
+        production_coefficient = self.gen_actions[actions]
+        production = production_coefficient * gen.upper_bound[self.timestep]
 
         cost = production * gen.cost[self.timestep]
 
@@ -1091,7 +1094,7 @@ class EnergyCommunitySequentialV9(MultiAgentEnv):
         gen.value[self.timestep] = production
         self.generators[idx].value[self.timestep] = production
 
-        return abs(cost), abs(penalty)
+        return cost, penalty
 
     # Get the aggregator observations
     def __get_aggregator_observations__(self) -> dict:
