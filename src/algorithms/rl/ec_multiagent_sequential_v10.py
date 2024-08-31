@@ -111,9 +111,6 @@ class EnergyCommunitySequentialV10(MultiAgentEnv):
 
         # Available overall and renewable energy for current timestep
         self.available_energy: float = -self.load_consumption[self.timestep]
-        self.available_ren_energy: float = 0.0
-        self.available_stor_energy: float = 0.0
-        self.available_ev_energy: float = 0.0
 
         # Create the agents
         self.possible_agents = ['ren_gen', 'storage', 'ev', 'gen', 'aggregator']
@@ -295,27 +292,8 @@ class EnergyCommunitySequentialV10(MultiAgentEnv):
         production_coefficient: float = self.ren_gen_actions[actions]
         production: float = production_coefficient * gen.upper_bound[self.timestep]
 
-        # cost = production * gen.cost[self.timestep]
-
-        # Check if we have surplus to attribute to a clean renewable pool
-        if self.available_energy < 0:
-            # Check if we provide more than necessary for the loads
-            if production > abs(self.available_energy):
-                # Calculate the surplus
-                surplus = production - abs(self.available_energy)
-
-                # Update the available renewable energy
-                self.available_ren_energy += surplus
-                self.available_energy += production
-
-            else:
-                # Update the available energy pool
-                self.available_energy += production
-                self.available_ren_energy = 0.0
-
-        else:
-            self.available_energy += production
-            self.available_ren_energy += production
+        # Update energy pool
+        self.available_energy += production
 
         # Set the production values on the resources
         idx = [i for i in range(len(self.ren_generators)) if self.ren_generators[i].name == gen.name][0]
@@ -340,9 +318,6 @@ class EnergyCommunitySequentialV10(MultiAgentEnv):
             storage_observations[storage.name] = gym.spaces.Dict({
                 'soc': gym.spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32),
                 'available_energy': gym.spaces.Box(low=-99999.0, high=99999.0, shape=(1,), dtype=np.float32),
-                'available_renewable_energy': gym.spaces.Box(low=0.0, high=99999.0, shape=(1,), dtype=np.float32),
-                'available_storage_energy': gym.spaces.Box(low=0.0, high=99999.0, shape=(1,), dtype=np.float32),
-                'available_ev_energy': gym.spaces.Box(low=0.0, high=99999.0, shape=(1,), dtype=np.float32),
                 'maximum_charge': gym.spaces.Box(low=0, high=99999.0, shape=(1,), dtype=np.float32),
                 'maximum_discharge': gym.spaces.Box(low=0, high=99999.0, shape=(1,), dtype=np.float32),
                 'import_price': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
@@ -366,12 +341,6 @@ class EnergyCommunitySequentialV10(MultiAgentEnv):
                             dtype=np.float32),
             'available_energy': np.array([self.available_energy],
                                          dtype=np.float32),
-            'available_renewable_energy': np.array([self.available_ren_energy],
-                                                   dtype=np.float32),
-            'available_storage_energy': np.array([self.available_stor_energy],
-                                                 dtype=np.float32),
-            'available_ev_energy': np.array([self.available_ev_energy],
-                                            dtype=np.float32),
             'maximum_charge': np.array([storage.charge_max[self.timestep]],
                                        dtype=np.float32),
             'maximum_discharge': np.array([storage.discharge_max[self.timestep]],
@@ -532,9 +501,6 @@ class EnergyCommunitySequentialV10(MultiAgentEnv):
             ev_observations[ev.name] = gym.spaces.Dict({
                 'soc': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
                 'available_energy': gym.spaces.Box(low=-99999.0, high=99999.0, shape=(1,), dtype=np.float32),
-                'available_renewable_energy': gym.spaces.Box(low=0.0, high=99999.0, shape=(1,), dtype=np.float32),
-                'available_storage_energy': gym.spaces.Box(low=0.0, high=99999.0, shape=(1,), dtype=np.float32),
-                'available_ev_energy': gym.spaces.Box(low=0.0, high=99999.0, shape=(1,), dtype=np.float32),
                 'maximum_charge': gym.spaces.Box(low=0, high=99999.0, shape=(1,), dtype=np.float32),
                 'maximum_discharge': gym.spaces.Box(low=0, high=99999.0, shape=(1,), dtype=np.float32),
                 'grid_connection': gym.spaces.Discrete(2),
@@ -592,12 +558,6 @@ class EnergyCommunitySequentialV10(MultiAgentEnv):
                             dtype=np.float32),
             'available_energy': np.array([self.available_energy],
                                          dtype=np.float32),
-            'available_renewable_energy': np.array([self.available_ren_energy],
-                                                   dtype=np.float32),
-            'available_storage_energy': np.array([self.available_stor_energy],
-                                                 dtype=np.float32),
-            'available_ev_energy': np.array([self.available_ev_energy],
-                                            dtype=np.float32),
             'maximum_charge': np.array([ev.schedule_charge[self.timestep]],
                                        dtype=np.float32),
             'maximum_discharge': np.array([ev.schedule_discharge[self.timestep]],
@@ -1027,9 +987,6 @@ class EnergyCommunitySequentialV10(MultiAgentEnv):
 
                         # Reset energy pools
                         self.available_energy = 0.0
-                        self.available_ren_energy = 0.0
-                        self.available_stor_energy = 0.0
-                        self.available_ev_energy = 0.0
 
                         # Update the pool with the sum of loads
                         self.available_energy -= self.load_consumption[self.timestep]
