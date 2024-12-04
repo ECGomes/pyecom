@@ -32,6 +32,7 @@ class BaseResource:
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
         self.cost = cost
+        self.priority: int = 0
 
     def __repr__(self):
         return f'{self.name}'
@@ -71,6 +72,13 @@ class BaseResource:
 
     def __pow__(self, other):
         return self.value ** other.value
+
+    def istype(self, cls):
+        return isinstance(self, cls)
+
+    # Get the object type
+    def get_type(self):
+        return type(self)
 
     def ravel(self):
         return self.value.ravel()
