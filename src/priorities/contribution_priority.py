@@ -20,6 +20,7 @@ class ContributionPriority(Priority):
 
     The priority is normalized to the range [0, 1] by dividing by the maximum priority.
 
+    Method calculate_priority() is not used, as update_resources handles the priority update.
     """
 
     def __init__(self, data):
@@ -28,7 +29,6 @@ class ContributionPriority(Priority):
 
         self.priorities = None
 
-    # TODO: Implement this method
     def calculate_priority(self):
         pass
 
