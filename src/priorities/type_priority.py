@@ -13,9 +13,6 @@ class EmpiricalPriority(Priority):
         super().__init__(data)
         self.data = copy.deepcopy(data)
 
-    def calculate_max_priority(self) -> np.array(int):
-        return np.max(self.data, axis=1)
-
     def calculate_group_priority(self):
         """
         Calculate the priority of resource types
@@ -93,7 +90,7 @@ class EmpiricalPriority(Priority):
 
         return individual_priority
 
-    def calculate_priority(self):
+    def calculate_priority_df(self):
         """
         Calculate the priority list
         """
@@ -102,10 +99,22 @@ class EmpiricalPriority(Priority):
         df = pd.DataFrame({})
         df['priority'] = self.calculate_group_priority()
         df['type'] = [x.get_type() for x in self.data]
+        df['name'] = [x.name for x in self.data]
 
         # Calculate the priority of the resources
         for type in df['type'].unique():
             priority = self.calculate_resource_size_priority(type)
             df.loc[df['type'] == type, 'priority'] += priority
 
-        return df['priority'].values
+        return df
+
+    def calculate_priority(self, ascending: bool | None = False):
+        """
+        Return the priority list
+        """
+
+        priority_df = self.calculate_priority_df()
+        if ascending is not None:
+            return priority_df.sort_values(by='priority', ascending=ascending)
+        else:
+            return priority_df
