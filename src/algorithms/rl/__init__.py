@@ -27,4 +27,6 @@ from .ec_multiagent_baseline_v1 import EnergyCommunityBaselineV1
 from .ec_multiagent_baseline_v2 import EnergyCommunityBaselineV2
 from .ec_multiagent_baseline_v3 import EnergyCommunityBaselineV3
 
+from .ec_contribution_priority_v0 import EnergyCommunityContributionPriorityV0
+
 from .utils import *

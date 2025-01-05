@@ -70,11 +70,20 @@ class ContributionPriority(Priority):
 
         # Update the priority of each resource
         for resource in new_data.keys():
-            # Calculate the contribution of the resource
-            contribution = (new_data[resource]['generation'] / total_generation +
-                            new_data[resource]['consumption'] / total_consumption)
 
-            # Update the priority of the resource
-            self.priorities[resource][timestep + 1] = contribution
+            if total_generation == 0 and total_consumption == 0:
+                self.priorities[resource][timestep] = 0
+            elif total_generation == 0:
+                self.priorities[resource][timestep] = new_data[resource]['consumption'] / total_consumption
+            elif total_consumption == 0:
+                self.priorities[resource][timestep] = new_data[resource]['generation'] / total_generation
+
+            else:
+                # Calculate the contribution of the resource
+                contribution = (new_data[resource]['generation'] / total_generation +
+                                new_data[resource]['consumption'] / total_consumption)
+
+                # Update the priority of the resource
+                self.priorities[resource][timestep] = contribution
 
         return
