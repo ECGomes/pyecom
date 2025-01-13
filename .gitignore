@@ -167,3 +167,4 @@ cython_debug/
 /models/
 /notebooks/seq_paper/
 /notebooks/local_tests/
+/notebooks/priority_paper/

@@ -1065,7 +1065,7 @@ class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
                                                    'consumption': res.exports[self.timestep]}
                     elif res.get_type() == Load:
                         contributions[res.name] = {'generation': 0.0,
-                                                   'consumption': res.value[self.timestep]}
+                                                   'consumption': res.upper_bound[self.timestep]}
             else:
                 if self.resources[res_type].get_type() == Generator:
                     contributions[self.resources[res_type].name] = {'generation': self.resources[res_type].value[self.timestep],

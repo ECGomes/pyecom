@@ -28,18 +28,18 @@ class EmpiricalPriority(Priority):
         priorities = []
         for resource in self.data:
             if resource.istype(Load):
-                priorities.append(5)
+                priorities.append(5.0)
             elif resource.istype(Generator):
                 if resource.is_renewable:
-                    priorities.append(4)
+                    priorities.append(4.0)
                 else:
-                    priorities.append(1)
+                    priorities.append(1.0)
             elif resource.istype(Vehicle):
-                priorities.append(3)
+                priorities.append(3.0)
             elif resource.istype(Storage):
-                priorities.append(2)
+                priorities.append(2.0)
             elif resource.istype(Aggregator):
-                priorities.append(0)
+                priorities.append(0.0)
             else:
                 raise ValueError(f"Resource {resource} not supported")
 
@@ -104,7 +104,9 @@ class EmpiricalPriority(Priority):
         # Calculate the priority of the resources
         for type in df['type'].unique():
             priority = self.calculate_resource_size_priority(type)
-            df.loc[df['type'] == type, 'priority'] += priority
+            #print('priority:', priority)
+            #print(df.loc[df['type'] == type]['priority'])
+            df.loc[df['type'] == type, 'priority'] += np.array(priority)
 
         return df
 
