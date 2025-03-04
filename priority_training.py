@@ -2,8 +2,6 @@
 
 import ray
 
-import IPython.core.display_functions
-
 from src.parsers import HMParser, CotevParser
 from src.algorithms.rl import EnergyCommunityContributionPriorityV4
 
