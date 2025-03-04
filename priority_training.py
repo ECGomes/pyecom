@@ -31,7 +31,7 @@ data_ev.parse()
 
 
 # UPAC Data load
-data_upacs = load_multiple_upacs_pv('/Users/ecgomes/Documents/PhD/UPAC data/upac*_pv.csv', resample='H')
+data_upacs = load_multiple_upacs_pv('data/upac_data/upac*_pv.csv', resample='H')
 
 
 
