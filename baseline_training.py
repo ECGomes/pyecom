@@ -3,13 +3,12 @@
 import ray
 
 from src.parsers import HMParser, CotevParser
-from src.algorithms.rl import EnergyCommunityContributionPriorityV4
+from src.algorithms.rl import EnergyCommunityBaselineV6
 
 from src.utils import load_multiple_upacs_pv, iterate_resources, create_ppo_policies
 
 import warnings
 warnings.filterwarnings('ignore')
-
 
 # Data parsing
 
@@ -40,36 +39,28 @@ data_upacs = load_multiple_upacs_pv('data/upac_data/upac*_pv.csv', resample='H')
 
 dataset_resources = iterate_resources(u=data_upacs, c=data_ec, e=data_ev, mode='monthly')
 
-
-
-
 # Create the environment and check if everything is ok
 
-temp_env = EnergyCommunityContributionPriorityV4(ren_generators=dataset_resources[
-                                                                    list(dataset_resources.keys())[0]][:5],
-                                                 generators=[],
-                                                 loads=dataset_resources[list(dataset_resources.keys())[0]][5:10],
-                                                 storages=dataset_resources[list(dataset_resources.keys())[0]][10:13],
-                                                 evs=dataset_resources[list(dataset_resources.keys())[0]][13:-1],
-                                                 aggregator=dataset_resources[list(dataset_resources.keys())[0]][-1],
-                                                 storage_penalty=1,
-                                                 ev_penalty=1,
-                                                 balance_penalty=1,
-                                                 look_ahead=12)
+temp_env = EnergyCommunityBaselineV6(ren_generators=dataset_resources[list(dataset_resources.keys())[0]][:5],
+                                     generators=[],
+                                     loads=dataset_resources[list(dataset_resources.keys())[0]][5:10],
+                                     storages=dataset_resources[list(dataset_resources.keys())[0]][10:13],
+                                     evs=dataset_resources[list(dataset_resources.keys())[0]][13:-1],
+                                     aggregator=dataset_resources[list(dataset_resources.keys())[0]][-1],
+                                     storage_penalty=1,
+                                     ev_penalty=1,
+                                     balance_penalty=1,
+                                     look_ahead=12)
 temp_env.reset()
 terminations = truncations = {a: False for a in temp_env.agents}
 terminations['__all__'] = False
 truncations['__all__'] = False
 while not terminations['__all__'] and not truncations['__all__']:
 
-    actions = temp_env.action_space.sample()
+    actions = temp_env.action_space_sample()
     next_obs, rewards, terminations, truncations, infos = temp_env.step(actions)
 
 print('Terminated: {}'.format(terminations['__all__']))
-
-
-
-
 
 # Create the policies to train
 
@@ -78,7 +69,6 @@ gammas = {'Generator': 0.0, 'Storage': 0.9, 'Vehicle': 0.9, 'Aggregator': 0.9}
 
 # Create the policies, one for each agent. Each policy has the name of the agent.
 policies = create_ppo_policies(temp_env, gammas)
-
 
 
 # Create individual networks for each agent
@@ -110,7 +100,6 @@ for agent in temp_env.agents:
     model_cfgs[agent] = model_cfg
 
 
-
 # Create an RLlib Algorithm instance from a PPOConfig to learn how to
 # act in the above environment.
 
@@ -139,26 +128,23 @@ checkpoint_path = None
 algo = None
 current_best = None
 
-# Build a loop for using separate resources on a daily basis
-# for datapoint in list(dataset_resources.keys())[1:2]:
-
 temp_resources = dataset_resources['2019-01']
 
-env = EnergyCommunityContributionPriorityV4(ren_generators=temp_resources[:5],
-                                            generators=[],
-                                            loads=temp_resources[5:10],
-                                            storages=temp_resources[10:13],
-                                            evs=temp_resources[13:-1],
-                                            aggregator=temp_resources[-1],
-                                            storage_penalty=STORAGE_ACTION_PENALTY,
-                                            ev_penalty=EV_REQUIREMENT_PENALTY,
-                                            balance_penalty=BALANCE_PENALTY,
-                                            look_ahead=12)
-register_env("EC_Contrib_V4", lambda config: env)
+env = EnergyCommunityBaselineV6(ren_generators=temp_resources[:5],
+                                generators=[],
+                                loads=temp_resources[5:10],
+                                storages=temp_resources[10:13],
+                                evs=temp_resources[13:-1],
+                                aggregator=temp_resources[-1],
+                                storage_penalty=STORAGE_ACTION_PENALTY,
+                                ev_penalty=EV_REQUIREMENT_PENALTY,
+                                balance_penalty=BALANCE_PENALTY,
+                                look_ahead=12)
+register_env("EC_Baseline_V3", lambda config: env)
 
 # Define the PPOConfig
 _config = (PPOConfig()
-           .environment(env="EC_Contrib_V4", disable_env_checking=False)
+           .environment(env="EC_Baseline_V3", disable_env_checking=False)
            .training(train_batch_size=256,
                      lr=5e-5,
                      gamma=0.99,
@@ -170,14 +156,13 @@ _config = (PPOConfig()
                      )
            .exploration(exploration_config={})
            .framework('torch')
-           .resources(num_cpus_per_worker=10)
            .multi_agent(policies=policies,
                         policies_to_train=list(policies.keys())[:-1],
                         policy_mapping_fn=(lambda agent_id, episode, worker, **kwargs:
                                            agent_id),
                         algorithm_config_overrides_per_module=model_cfgs)
            .rollouts(batch_mode='complete_episodes', #'complete_episodes',
-                     num_rollout_workers=1,
+                     num_rollout_workers=10,
                      rollout_fragment_length='auto'))
 
 scheduler = AsyncHyperBandScheduler(time_attr="training_iteration",
@@ -192,7 +177,8 @@ tuner = tune.Tuner(
     param_space=_config,
     run_config=train.RunConfig(stop={'training_iteration': MAX_ITER, 'episode_reward_mean': -40.0},
                                checkpoint_config=CheckpointConfig(checkpoint_frequency=10,
-                                                                  checkpoint_at_end=True)),
+                                                                  checkpoint_at_end=True),
+                               verbose=1),
     tune_config=tune.TuneConfig(scheduler=scheduler, num_samples=1),
 )
 

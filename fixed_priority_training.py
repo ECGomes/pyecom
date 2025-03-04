@@ -60,7 +60,8 @@ temp_env = EnergyCommunitySequentialV12(ren_generators=dataset_resources[list(da
                                         storage_penalty=1,
                                         ev_penalty=1,
                                         balance_penalty=1,
-                                        execution_order=order)
+                                        execution_order=order,
+                                        look_ahead=12)
 temp_env.reset()
 terminations = truncations = {a: False for a in temp_env.agents}
 terminations['__all__'] = False
@@ -149,7 +150,8 @@ env = EnergyCommunitySequentialV12(ren_generators=temp_resources[:5],
                                    storage_penalty=STORAGE_ACTION_PENALTY,
                                    ev_penalty=EV_REQUIREMENT_PENALTY,
                                    balance_penalty=BALANCE_PENALTY,
-                                   execution_order=order)
+                                   execution_order=order,
+                                   look_ahead=12)
 register_env("EC_Seq_V2", lambda config: env)
 
 # Define the PPOConfig
@@ -166,14 +168,13 @@ _config = (PPOConfig()
                      )
            .exploration(exploration_config={})
            .framework('torch')
-           .resources(num_cpus_per_worker=4)
            .multi_agent(policies=policies,
                         policies_to_train=list(policies.keys())[:-1],
                         policy_mapping_fn=(lambda agent_id, episode, worker, **kwargs:
                                            agent_id),
                         algorithm_config_overrides_per_module=model_cfgs)
            .rollouts(batch_mode='complete_episodes',
-                     num_rollout_workers=4,
+                     num_rollout_workers=10,
                      rollout_fragment_length='auto'))
 
 
