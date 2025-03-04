@@ -86,6 +86,9 @@ class EmpiricalPriority(Priority):
 
         # Calculate and attribute a decimal part
         res_size = res_size / np.max(res_size) if type != Aggregator else 0
+
+        # Invert the priority, so the bigger the resource, the smaller the priority
+        res_size = 1 - res_size
         individual_priority = res_size * 0.9
 
         return individual_priority

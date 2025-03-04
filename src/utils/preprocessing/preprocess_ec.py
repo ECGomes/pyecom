@@ -87,7 +87,7 @@ def iterate_resources(u, c, e, mode='daily'):
     :param u: dict with the UPAC data
     :param c: dict with the EC data
     :param e: dict with the EV data
-    :param mode: str with the mode to iterate over the datasets. Options: 'daily', 'monthly', 'yearly'
+    :param mode: str with the mode to iterate over the datasets. Options: 'daily', 'weekly', 'monthly', 'yearly'
     """
 
     temp = {}
@@ -110,11 +110,28 @@ def iterate_resources(u, c, e, mode='daily'):
                                           ec=c,
                                           ev=temp_e)
 
+    elif mode == 'weekly':
+
+        # Loop to iterate over weeks in the datasets
+        for i in np.unique(u[first_key].index.strftime('%Y-%U')):
+
+            # Get the range of dates for the week
+            week = u[first_key].loc[u[first_key].index.strftime('%Y-%U') == i].index
+            week_start = week[0].strftime('%Y-%m-%d')
+            week_end = week[-1].strftime('%Y-%m-%d')
+
+            temp_u = {k: v.loc[week_start:week_end] for k, v in u.items()}
+            temp_e = e.create_resources(e.population, e.trips_grid, e.assigned_segments, week_start, week_end)
+
+            temp[i] = create_resources(upacs=temp_u,
+                                       ec=c,
+                                       ev=temp_e)
+
     elif mode == 'monthly':
 
         # Loop to iterate over months in the datasets
         # Need to be careful with different years
-        unique_months = np.unique(u['02'].index.strftime('%Y-%m'))
+        unique_months = np.unique(u[first_key].index.strftime('%Y-%m'))
 
         for i in unique_months:
             # Create the resources for the training environment
@@ -130,7 +147,7 @@ def iterate_resources(u, c, e, mode='daily'):
     elif mode == 'yearly':
 
         # Loop to iterate over years in the datasets
-        unique_years = np.unique(u['02'].index.strftime('%Y'))
+        unique_years = np.unique(u[first_key].index.strftime('%Y'))
 
         for i in unique_years:
             # Create the resources for the training environment

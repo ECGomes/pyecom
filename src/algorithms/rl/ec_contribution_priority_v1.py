@@ -8,13 +8,16 @@ from src.resources import Generator, Load, Storage, Vehicle, Aggregator
 from src.priorities import ContributionPriority
 
 
-class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
+class EnergyCommunityContributionPriorityV1(MultiAgentEnv):
     """
     Takes the EnergyCommmunitySequential-v10 environment and
     adds a priority system based on the contribution of each
     resource to the system.
 
     Contribution mechanism is implemented on the contribution_priority.py file.
+
+    V1 does not consider renewable generators as a controllable agent.
+    For simplicity, the environment will consider the renewable generators as deterministic, and act first.
     """
 
     metadata = {'name': 'EnergyCommunityContributionPriority-v0'}
@@ -98,8 +101,12 @@ class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
 
         # We'll ignore the loads, and force the aggregator to be the last agent
         self.execution_order = [agent for agent in self.execution_order
-                                if (not agent.startswith('load')) and (not agent.startswith('aggregator'))]
+                                if (not agent.startswith('load')) and (not agent.startswith('aggregator')) and
+                                (not agent.startswith('ren_gen'))]
         self.execution_order.append('aggregator')
+
+        # We'll prepend the renewable generators. Order is not important for them.
+        self.execution_order = [ren_gen.name for ren_gen in self.ren_generators] + self.execution_order
         self.executed_agents = [False for _ in range(len(self.execution_order))]
 
         # Available overall and renewable energy for current timestep
@@ -282,7 +289,7 @@ class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
         cost: float = 0.0
         penalty: float = 0.0
 
-        production_coefficient: float = self.ren_gen_actions[actions]
+        production_coefficient: float = 1.0  # self.ren_gen_actions[actions]
         production: float = production_coefficient * gen.upper_bound[self.timestep]
 
         # Update energy pool
@@ -993,8 +1000,13 @@ class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
                         # We'll ignore the loads, and force the aggregator to be the last agent
                         self.execution_order = [agent for agent in self.execution_order
                                                 if (not agent.startswith('load')) and
-                                                (not agent.startswith('aggregator'))]
+                                                (not agent.startswith('aggregator')) and
+                                                (not agent.startswith('ren_gen'))]
                         self.execution_order.append('aggregator')
+
+                        # We'll prepend the renewable generators. Order is not important for them.
+                        self.execution_order = [ren_gen.name for ren_gen in self.ren_generators] \
+                                               + self.execution_order
 
                         observations = self._get_observations()
                         info = self._log_info()
@@ -1053,36 +1065,36 @@ class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
             if type(self.resources[res_type]) == list:
                 for res in self.resources[res_type]:
                     if res.get_type() == Generator:
-                        contributions[res.name] = {'generation': res.value[self.timestep],
-                                                   'consumption': 0.0}
+                        contributions[res.name] = {'generation': list(res.value[:self.timestep]),
+                                                   'consumption': [0.0 for _ in range(self.timestep)]}
                     elif res.get_type() == Storage:
-                        contributions[res.name] = {'generation': res.discharge[self.timestep],
-                                                   'consumption': res.charge[self.timestep]}
+                        contributions[res.name] = {'generation': list(res.discharge[:self.timestep]),
+                                                   'consumption': list(res.charge[:self.timestep])}
                     elif res.get_type() == Vehicle:
-                        contributions[res.name] = {'generation': res.discharge[self.timestep],
-                                                   'consumption': res.charge[self.timestep]}
+                        contributions[res.name] = {'generation': list(res.discharge[:self.timestep]),
+                                                   'consumption': list(res.charge[:self.timestep])}
                     elif res.get_type() == Aggregator:
-                        contributions[res.name] = {'generation': res.imports[self.timestep],
-                                                   'consumption': res.exports[self.timestep]}
+                        contributions[res.name] = {'generation': list(res.imports[:self.timestep]),
+                                                   'consumption': list(res.exports[:self.timestep])}
                     elif res.get_type() == Load:
-                        contributions[res.name] = {'generation': 0.0,
-                                                   'consumption': res.upper_bound[self.timestep]}
+                        contributions[res.name] = {'generation': [0.0 for _ in range(self.timestep)],
+                                                   'consumption': list(res.upper_bound[:self.timestep])}
             else:
                 if self.resources[res_type].get_type() == Generator:
-                    contributions[self.resources[res_type].name] = {'generation': self.resources[res_type].value[self.timestep],
-                                                                    'consumption': 0.0}
+                    contributions[self.resources[res_type].name] = {'generation': list(self.resources[res_type].value[:self.timestep]),
+                                                                    'consumption': [0.0 for _ in range(self.timestep)]}
                 elif self.resources[res_type].get_type() == Storage:
-                    contributions[self.resources[res_type].name] = {'generation': self.resources[res_type].discharge[self.timestep],
-                                                                    'consumption': self.resources[res_type].charge[self.timestep]}
+                    contributions[self.resources[res_type].name] = {'generation': list(self.resources[res_type].discharge[:self.timestep]),
+                                                                    'consumption': list(self.resources[res_type].charge[:self.timestep])}
                 elif self.resources[res_type].get_type() == Vehicle:
-                    contributions[self.resources[res_type].name] = {'generation': self.resources[res_type].discharge[self.timestep],
-                                                                    'consumption': self.resources[res_type].charge[self.timestep]}
+                    contributions[self.resources[res_type].name] = {'generation': list(self.resources[res_type].discharge[:self.timestep]),
+                                                                    'consumption': list(self.resources[res_type].charge[:self.timestep])}
                 elif self.resources[res_type].get_type() == Aggregator:
-                    contributions[self.resources[res_type].name] = {'generation': self.resources[res_type].imports[self.timestep],
-                                                                    'consumption': self.resources[res_type].exports[self.timestep]}
+                    contributions[self.resources[res_type].name] = {'generation': list(self.resources[res_type].imports[:self.timestep]),
+                                                                    'consumption': list(self.resources[res_type].exports[:self.timestep])}
                 elif self.resources[res_type].get_type() == Load:
-                    contributions[self.resources[res_type].name] = {'generation': 0.0,
-                                                                    'consumption': self.resources[res_type].value[self.timestep]}
+                    contributions[self.resources[res_type].name] = {'generation': [0.0 for _ in range(self.timestep)],
+                                                                    'consumption': list(self.resources[res_type].value[:self.timestep])}
 
         return contributions
 

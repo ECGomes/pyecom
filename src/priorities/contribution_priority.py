@@ -23,11 +23,26 @@ class ContributionPriority(Priority):
     Method calculate_priority() is not used, as update_resources handles the priority update.
     """
 
-    def __init__(self, data):
+    def __init__(self, data,
+                 alpha: float = 0.5,
+                 beta: float = 0.5,
+                 log_scaling: bool = False):
+        """
+        Initialize the ContributionPriority object.
+        :param data: List of resources
+        :param alpha: Weight of the contribution to the total generation
+        :param beta: Weight of the contribution to the total consumption
+        :param log_scaling: If True, each component of priority is scaled logarithmically
+        """
         super().__init__(data)
         self.data = copy.deepcopy(data)
 
         self.priorities = None
+
+        # Parameters for the priority calculation
+        self.alpha = alpha
+        self.beta = beta
+        self.log_scaling = log_scaling
 
     def calculate_priority(self):
         pass
@@ -58,32 +73,42 @@ class ContributionPriority(Priority):
         Dictionary Structure:
         {
             'resource_name': {
-                'generation': float,
-                'consumption': float
+                'generation': series of floats,
+                'consumption': series of floats
             }
         }
         """
 
         # Sum all the generation and consumption values
-        total_generation = sum([x['generation'] for x in new_data.values()])
-        total_consumption = sum([x['consumption'] for x in new_data.values()])
+        total_generation = sum([sum(x['generation']) for x in new_data.values()]) + 1
+        total_consumption = sum([sum(x['consumption']) for x in new_data.values()]) + 1
 
         # Update the priority of each resource
         for resource in new_data.keys():
 
-            if total_generation == 0 and total_consumption == 0:
-                self.priorities[resource][timestep] = 0
-            elif total_generation == 0:
-                self.priorities[resource][timestep] = new_data[resource]['consumption'] / total_consumption
-            elif total_consumption == 0:
-                self.priorities[resource][timestep] = new_data[resource]['generation'] / total_generation
+            if self.log_scaling:
+                total_generation = np.log(total_generation + 1)
+                total_consumption = np.log(total_consumption + 1)
 
-            else:
-                # Calculate the contribution of the resource
-                contribution = (new_data[resource]['generation'] / total_generation +
-                                new_data[resource]['consumption'] / total_consumption)
+                contribution = self.alpha * (np.log(sum(new_data[resource]['generation']) + 1) / total_generation) + \
+                               self.beta * (np.log(sum(new_data[resource]['consumption']) + 1) / total_consumption)
 
                 # Update the priority of the resource
                 self.priorities[resource][timestep] = contribution
+
+            else:
+                if total_generation == 0 and total_consumption == 0:
+                    self.priorities[resource][timestep] = 0
+                elif total_generation == 0:
+                    self.priorities[resource][timestep] = sum(new_data[resource]['consumption']) / total_consumption
+                elif total_consumption == 0:
+                    self.priorities[resource][timestep] = sum(new_data[resource]['generation']) / total_generation
+                else:
+                    # Calculate the contribution of the resource
+                    contribution = self.alpha * (sum(new_data[resource]['generation']) / total_generation) + \
+                                   self.beta * (sum(new_data[resource]['consumption']) / total_consumption)
+
+                    # Update the priority of the resource
+                    self.priorities[resource][timestep] = contribution
 
         return

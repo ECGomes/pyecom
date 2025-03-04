@@ -8,16 +8,20 @@ from src.resources import Generator, Load, Storage, Vehicle, Aggregator
 from src.priorities import ContributionPriority
 
 
-class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
+class EnergyCommunityContributionPriorityV2(MultiAgentEnv):
     """
     Takes the EnergyCommmunitySequential-v10 environment and
     adds a priority system based on the contribution of each
     resource to the system.
 
     Contribution mechanism is implemented on the contribution_priority.py file.
+
+    V2 consider separate energy pools for renewable and non-renewable energy.
+    Also considers energy pools from storages and EVs.
+
     """
 
-    metadata = {'name': 'EnergyCommunityContributionPriority-v0'}
+    metadata = {'name': 'EnergyCommunityContributionPriority-v2'}
 
     def __init__(self,
                  ren_generators: list[Generator],
@@ -98,12 +102,19 @@ class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
 
         # We'll ignore the loads, and force the aggregator to be the last agent
         self.execution_order = [agent for agent in self.execution_order
-                                if (not agent.startswith('load')) and (not agent.startswith('aggregator'))]
+                                if (not agent.startswith('load')) and (not agent.startswith('aggregator')) and
+                                (not agent.startswith('ren_gen'))]
         self.execution_order.append('aggregator')
+
+        # We'll prepend the renewable generators. Order is not important for them.
+        self.execution_order = [ren_gen.name for ren_gen in self.ren_generators] + self.execution_order
         self.executed_agents = [False for _ in range(len(self.execution_order))]
 
         # Available overall and renewable energy for current timestep
         self.available_energy: float = -self.load_consumption[self.timestep]
+        self.available_ren_energy: float = 0.0
+        self.available_stor_energy: float = 0.0
+        self.available_ev_energy: float = 0.0
 
         # Create the agents
         self.possible_agents = ['ren_gen', 'storage', 'ev', 'gen', 'aggregator']
@@ -282,11 +293,30 @@ class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
         cost: float = 0.0
         penalty: float = 0.0
 
-        production_coefficient: float = self.ren_gen_actions[actions]
+        production_coefficient: float = 1.0  # self.ren_gen_actions[actions]
         production: float = production_coefficient * gen.upper_bound[self.timestep]
 
-        # Update energy pool
-        self.available_energy += production
+        # cost = production * gen.cost[self.timestep]
+
+        # Check if we have surplus to attribute to a clean renewable pool
+        if self.available_energy < 0:
+            # Check if we provide more than necessary for the loads
+            if production > abs(self.available_energy):
+                # Calculate the surplus
+                surplus = production - abs(self.available_energy)
+
+                # Update the available renewable energy
+                self.available_ren_energy += surplus
+                self.available_energy += production
+
+            else:
+                # Update the available energy pool
+                self.available_energy += production
+                self.available_ren_energy = 0.0
+
+        else:
+            self.available_energy += production
+            self.available_ren_energy += production
 
         # Set the production values on the resources
         idx = [i for i in range(len(self.ren_generators)) if self.ren_generators[i].name == gen.name][0]
@@ -311,6 +341,9 @@ class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
             storage_observations[storage.name] = gym.spaces.Dict({
                 'soc': gym.spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32),
                 'available_energy': gym.spaces.Box(low=-99999.0, high=99999.0, shape=(1,), dtype=np.float32),
+                'available_renewable_energy': gym.spaces.Box(low=0.0, high=99999.0, shape=(1,), dtype=np.float32),
+                'available_storage_energy': gym.spaces.Box(low=0.0, high=99999.0, shape=(1,), dtype=np.float32),
+                'available_ev_energy': gym.spaces.Box(low=0.0, high=99999.0, shape=(1,), dtype=np.float32),
                 'maximum_charge': gym.spaces.Box(low=0, high=99999.0, shape=(1,), dtype=np.float32),
                 'maximum_discharge': gym.spaces.Box(low=0, high=99999.0, shape=(1,), dtype=np.float32),
                 'import_price': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
@@ -334,6 +367,12 @@ class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
                             dtype=np.float32),
             'available_energy': np.array([self.available_energy],
                                          dtype=np.float32),
+            'available_renewable_energy': np.array([self.available_ren_energy],
+                                                   dtype=np.float32),
+            'available_storage_energy': np.array([self.available_stor_energy],
+                                                 dtype=np.float32),
+            'available_ev_energy': np.array([self.available_ev_energy],
+                                            dtype=np.float32),
             'maximum_charge': np.array([storage.charge_max[self.timestep]],
                                        dtype=np.float32),
             'maximum_discharge': np.array([storage.discharge_max[self.timestep]],
@@ -428,10 +467,111 @@ class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
                 to_charge = abs(0.9 - storage.value[self.timestep]) * storage.capacity_max
                 charge = to_charge / storage.charge_max[self.timestep]
 
-            cost = to_charge * storage.cost_charge[self.timestep]
+            to_charge = np.round(to_charge, 4)
+            charge = np.round(charge, 4)
 
-            # Update the available energy
-            self.available_energy -= to_charge
+            # Make sure that we don't run into any charge issues (picking charge but can't charge it)
+            if (to_charge > 0.0) & (charge > 0.0):
+                # Check energy balance
+                if self.available_energy < 0.0:
+                    # As this is formulated, if available energy is negative, there is no renewable energy available.
+                    # In this case, we can only charge from the grid and just add the cost.
+                    # The cost is the charge * (cost_charge + import_price), as efficiency should not be considered
+                    cost = to_charge * (storage.cost_charge[self.timestep] + self.aggregator.import_cost[self.timestep])
+
+                else:
+                    # Try to charge from renewable energy
+                    current_charge = deepcopy(to_charge)
+                    if self.available_ren_energy > 0.0:
+                        # Check if we can charge from renewable energy
+                        if current_charge >= self.available_ren_energy:
+                            # If we cannot charge, charge the maximum possible from renewable energy
+                            # And use the rest from other sources.
+                            # We'll consider that there are no further efficiency losses
+                            ren_charge = self.available_ren_energy
+
+                            # Calculate the cost
+                            cost -= ren_charge * self.aggregator.import_cost[self.timestep]
+
+                            # Update the available energy
+                            self.available_ren_energy = 0.0
+
+                            # Update the current charge
+                            current_charge -= ren_charge
+
+                        else:
+                            # Charge from renewable energy
+                            # cost = to_charge * storage.cost_charge[self.timestep]
+                            cost -= (to_charge * self.aggregator.import_cost[self.timestep])
+
+                            current_charge = 0.0
+
+                            # Update the available energy
+                            self.available_ren_energy -= to_charge
+
+                    # Charge other sources -> this is the case where we have no renewable energy available
+                    # But are charging. We need to be careful with the exchange of energy between the various
+                    # storages and discourage it.
+                    if (self.available_stor_energy > 0.0) & (current_charge > 0.0):
+                        # Check if we can charge from storage
+                        if current_charge >= self.available_stor_energy:
+                            # If we cannot charge, charge the maximum possible from storage
+                            # And use the rest from other sources.
+                            # We'll consider that there are no further efficiency losses
+                            stor_charge = self.available_stor_energy
+
+                            # Calculate the cost -> add a penalty for the exchange of energy between storages
+                            cost += stor_charge * storage.cost_charge[self.timestep]
+
+                            # Update the available energy
+                            self.available_stor_energy = 0.0
+
+                            # Update the current charge
+                            current_charge -= stor_charge
+
+                        else:
+                            # Charge from storage. Add a penalty for the exchange of energy between storages
+                            cost += current_charge * storage.cost_charge[self.timestep]
+
+                            # Update the available energy
+                            self.available_stor_energy -= current_charge
+
+                            # Update the current charge
+                            current_charge = 0.0
+
+                    if (self.available_ev_energy > 0.0) & (current_charge > 0.0):
+                        # Check if we can charge from EVs
+                        if current_charge >= self.available_ev_energy:
+                            # If we cannot charge, charge the maximum possible from EVs
+                            # And use the rest from other sources.
+                            # We'll consider that there are no further efficiency losses
+                            ev_charge = self.available_ev_energy
+
+                            # Calculate the cost -> add a penalty for the exchange of energy between storages
+                            cost += ev_charge * storage.cost_charge[self.timestep]
+
+                            # Update the available energy
+                            self.available_ev_energy = 0.0
+
+                            # Update the current charge
+                            current_charge -= ev_charge
+
+                        else:
+                            # Charge from EVs. Add a penalty for the exchange of energy between storages
+                            cost += current_charge * self.storage_penalty
+
+                            # Update the available energy
+                            self.available_ev_energy -= current_charge
+
+                            # Update the current charge
+                            current_charge = 0.0
+
+                    cost += current_charge * \
+                            (storage.cost_charge[self.timestep] + \
+                             self.aggregator.import_cost[self.timestep])
+
+                # Update the available energy
+                self.available_energy -= to_charge
 
         # Discharge state
         elif storage_action < 0.0:
@@ -451,10 +591,29 @@ class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
                 to_discharge = (storage.value[self.timestep] - storage.capacity_min) * storage.capacity_max
                 discharge = to_discharge / storage.discharge_max[self.timestep]
 
-            cost = to_discharge * storage.cost_discharge[self.timestep]
+            if (to_discharge > 0.0) & (discharge > 0.0):
 
-            # Update the available energy
-            self.available_energy += to_discharge
+                # Check when are we discharging
+                if self.available_energy >= 0.0:
+                    # We are discharging to sell
+                    cost = to_discharge * (storage.cost_discharge[self.timestep])
+                    self.available_stor_energy += to_discharge
+
+                else:
+                    # Separate the costs and earning according to energy pool satisfaction
+                    if self.available_energy + to_discharge > 0:
+                        # We are discharging to save up to certain point
+                        surplus = to_discharge - abs(self.available_energy)
+
+                        self.available_stor_energy = surplus
+
+                        cost = - (to_discharge - surplus) * self.aggregator.import_cost[self.timestep]
+                    else:
+                        # We are discharging to save
+                        cost = - to_discharge * self.aggregator.import_cost[self.timestep]
+
+                # Update the available energy
+                self.available_energy += to_discharge
 
 
         # Update resource charge and discharge values
@@ -469,6 +628,10 @@ class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
         self.storages[idx].value[self.timestep] = new_storage_value
         self.storages[idx].charge[self.timestep] = to_charge
         self.storages[idx].discharge[self.timestep] = to_discharge
+
+        # Check if the storage SoC is under the minimum
+        if storage.value[self.timestep] < storage.capacity_min:
+            penalty += self.storage_penalty
 
         return cost, penalty
 
@@ -494,6 +657,9 @@ class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
             ev_observations[ev.name] = gym.spaces.Dict({
                 'soc': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
                 'available_energy': gym.spaces.Box(low=-99999.0, high=99999.0, shape=(1,), dtype=np.float32),
+                'available_renewable_energy': gym.spaces.Box(low=0.0, high=99999.0, shape=(1,), dtype=np.float32),
+                'available_storage_energy': gym.spaces.Box(low=0.0, high=99999.0, shape=(1,), dtype=np.float32),
+                'available_ev_energy': gym.spaces.Box(low=0.0, high=99999.0, shape=(1,), dtype=np.float32),
                 'maximum_charge': gym.spaces.Box(low=0, high=99999.0, shape=(1,), dtype=np.float32),
                 'maximum_discharge': gym.spaces.Box(low=0, high=99999.0, shape=(1,), dtype=np.float32),
                 'grid_connection': gym.spaces.Discrete(2),
@@ -551,6 +717,12 @@ class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
                             dtype=np.float32),
             'available_energy': np.array([self.available_energy],
                                          dtype=np.float32),
+            'available_renewable_energy': np.array([self.available_ren_energy],
+                                                   dtype=np.float32),
+            'available_storage_energy': np.array([self.available_stor_energy],
+                                                 dtype=np.float32),
+            'available_ev_energy': np.array([self.available_ev_energy],
+                                            dtype=np.float32),
             'maximum_charge': np.array([ev.schedule_charge[self.timestep]],
                                        dtype=np.float32),
             'maximum_discharge': np.array([ev.schedule_discharge[self.timestep]],
@@ -618,13 +790,13 @@ class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
 
                 next_departure_soc = ev.schedule_requirement_soc[self.timestep]
 
-                if ev.value[self.timestep] < next_departure_soc / ev.capacity_max:
+                if (ev.value[self.timestep] - 0.2) < next_departure_soc / ev.capacity_max:
                     # Attribute penalty
                     penalty = self.ev_penalty
 
                     # Discharge the EV with the possible energy
-                    ev.value[self.timestep] = 0.0
-                    self.evs[idx].value[self.timestep] = 0.0
+                    ev.value[self.timestep] = 0.2
+                    self.evs[idx].value[self.timestep] = 0.2
 
                 else:
                     new_ev_val = ev.value[self.timestep] - (next_departure_soc / ev.capacity_max)
@@ -651,19 +823,6 @@ class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
                 self.evs[idx].charge[self.timestep] = charge
                 self.evs[idx].discharge[self.timestep] = discharge
 
-                # Get the next departure time and energy requirement
-                #next_departure = np.where(ev.schedule_requirement_soc > 0)[0]
-                #next_departure = next_departure[next_departure >= self.timestep]
-
-                #remains_trips = len(next_departure) > 0
-                #next_departure_soc = ev.schedule_requirement_soc[next_departure[0]] \
-                #    if remains_trips else ev.min_charge
-
-                #if ev.value[self.timestep] >= next_departure_soc / ev.capacity_max:
-                #    # If the EV is already charged, we can attribute a reward
-                #    cost = -self.storage_penalty
-                #    penalty = 0.0
-
             # Charge state
             elif ev_action > 0.0:
                 # Get the charge value
@@ -684,10 +843,107 @@ class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
                     to_charge = np.round(abs((0.9 - ev.value[self.timestep]) * ev.capacity_max), 4)
                     charge = to_charge / ev.schedule_charge[self.timestep]
 
-                cost = to_charge * ev.cost_charge[self.timestep]
+                if (to_charge > 0.0) & (charge > 0.0):
+                    # Check energy balance
+                    if self.available_energy < 0.0:
+                        # If available energy is negative, there is no renewable energy available.
+                        # In this case, we can only charge from the grid and just add the cost.
+                        # The cost is the charge * (cost_charge + import_price), as efficiency should not be considered
+                        cost = to_charge * (ev.cost_charge[self.timestep] + self.aggregator.import_cost[self.timestep])
 
-                # Update the available energy
-                self.available_energy -= to_charge
+                    else:
+                        # Go through Renewable energy
+                        current_charge = deepcopy(to_charge)
+                        if self.available_ren_energy > 0.0:
+                            # Check if we can charge from renewable energy
+                            if current_charge >= self.available_ren_energy:
+                                # If we cannot charge, charge the maximum possible from renewable energy
+                                # And use the rest from other sources.
+                                # We'll consider that there are no further efficiency losses
+                                ren_charge = self.available_ren_energy
+
+                                # Calculate the cost
+                                cost -= ren_charge * self.aggregator.import_cost[self.timestep]
+
+                                # Update the available energy
+                                self.available_ren_energy = 0.0
+
+                                # Update the current charge
+                                current_charge -= ren_charge
+
+                            else:
+                                # Charge from renewable energy
+                                # cost = to_charge * storage.cost_charge[self.timestep]
+                                cost -= (current_charge * self.aggregator.import_cost[self.timestep])
+
+                                # Update the available energy
+                                self.available_ren_energy -= current_charge
+
+                                current_charge = 0.0
+
+                        # Charge other sources -> this is the case where we have no renewable energy available
+                        # But are charging. We need to be careful with the exchange of energy between the various
+                        # storages and discourage it.
+                        if (self.available_stor_energy > 0.0) & (current_charge > 0.0):
+                            # Check if we can charge from storage
+                            if current_charge >= self.available_stor_energy:
+                                # If we cannot charge, charge the maximum possible from storage
+                                # And use the rest from other sources.
+                                # We'll consider that there are no further efficiency losses
+                                stor_charge = self.available_stor_energy
+
+                                # Calculate the cost -> add a penalty for the exchange of energy between storages
+                                cost += stor_charge * ev.cost_charge[self.timestep]
+
+                                # Update the available energy
+                                self.available_stor_energy = 0.0
+
+                                # Update the current charge
+                                current_charge -= stor_charge
+
+                            else:
+                                # Charge from storage. Add a penalty for the exchange of energy between storages
+                                cost += current_charge * ev.cost_charge[self.timestep]
+
+                                # Update the available energy
+                                self.available_stor_energy -= current_charge
+
+                                # Update the current charge
+                                current_charge = 0.0
+
+                        if (self.available_ev_energy > 0.0) & (current_charge > 0.0):
+                            # Check if we can charge from EVs
+                            if current_charge >= self.available_ev_energy:
+                                # If we cannot charge, charge the maximum possible from EVs
+                                # And use the rest from other sources.
+                                # We'll consider that there are no further efficiency losses
+                                ev_charge = self.available_ev_energy
+
+                                # Calculate the cost -> add a penalty for the exchange of energy between storages
+                                cost += ev_charge * ev.cost_charge[self.timestep]
+
+                                # Update the available energy
+                                self.available_ev_energy = 0.0
+
+                                # Update the current charge
+                                current_charge -= ev_charge
+
+                            else:
+                                # Charge from EVs. Add a penalty for the exchange of energy between storages
+                                cost += current_charge * ev.cost_charge[self.timestep]
+
+                                # Update the available energy
+                                self.available_ev_energy -= current_charge
+
+                                # Update the current charge
+                                current_charge = 0.0
+
+                        cost += current_charge * \
+                                (ev.cost_charge[self.timestep] + \
+                                 self.aggregator.import_cost[self.timestep])
+
+                    # Update the available energy
+                    self.available_energy -= to_charge
 
             # Discharge state
             elif ev_action < 0.0:
@@ -709,10 +965,29 @@ class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
                     to_discharge = abs(ev.value[self.timestep] - 0.2) * ev.capacity_max
                     discharge = to_discharge / ev.schedule_discharge[self.timestep]
 
-                cost = to_discharge * ev.cost_discharge[self.timestep]
+                if (to_discharge > 0.0) & (discharge > 0.0):
 
-                # Update the available energy
-                self.available_energy += to_discharge
+                    # Check when are we discharging
+                    if self.available_energy >= 0.0:
+                        # We are discharging to sell
+                        cost = to_discharge * (ev.cost_discharge[self.timestep])
+                        self.available_ev_energy += to_discharge
+
+                    else:
+                        # Separate the costs and earning according to energy pool satisfaction
+                        if self.available_energy + to_discharge > 0:
+                            # We are discharging to save up to certain point
+                            surplus = to_discharge - abs(self.available_energy)
+
+                            self.available_ev_energy = surplus
+
+                            cost = - abs(to_discharge - surplus) * self.aggregator.import_cost[self.timestep]
+                        else:
+                            # We are discharging to save
+                            cost = - to_discharge * self.aggregator.import_cost[self.timestep]
+
+                    # Update the available energy
+                    self.available_energy += to_discharge
 
         # Update the value of the EV
         charge_w_eff = np.round(abs(to_charge * ev.charge_efficiency), 4)
@@ -722,6 +997,10 @@ class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
         self.evs[idx].value[self.timestep] = ev.value[self.timestep]
         self.evs[idx].charge[self.timestep] = to_charge
         self.evs[idx].discharge[self.timestep] = to_discharge
+
+        # Check if the EV is under 0.2 SoC and penalize if so
+        if ev.value[self.timestep] <= 0.2:
+            penalty += self.ev_penalty
 
         return cost, penalty
 
@@ -979,6 +1258,9 @@ class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
 
                         # Reset energy pools
                         self.available_energy = 0.0
+                        self.available_ren_energy = 0.0
+                        self.available_stor_energy = 0.0
+                        self.available_ev_energy = 0.0
 
                         # Update the pool with the sum of loads
                         self.available_energy -= self.load_consumption[self.timestep]
@@ -993,8 +1275,13 @@ class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
                         # We'll ignore the loads, and force the aggregator to be the last agent
                         self.execution_order = [agent for agent in self.execution_order
                                                 if (not agent.startswith('load')) and
-                                                (not agent.startswith('aggregator'))]
+                                                (not agent.startswith('aggregator')) and
+                                                (not agent.startswith('ren_gen'))]
                         self.execution_order.append('aggregator')
+
+                        # We'll prepend the renewable generators. Order is not important for them.
+                        self.execution_order = [ren_gen.name for ren_gen in self.ren_generators] \
+                                               + self.execution_order
 
                         observations = self._get_observations()
                         info = self._log_info()
@@ -1053,36 +1340,36 @@ class EnergyCommunityContributionPriorityV0(MultiAgentEnv):
             if type(self.resources[res_type]) == list:
                 for res in self.resources[res_type]:
                     if res.get_type() == Generator:
-                        contributions[res.name] = {'generation': res.value[self.timestep],
-                                                   'consumption': 0.0}
+                        contributions[res.name] = {'generation': list(res.value[:self.timestep]),
+                                                   'consumption': [0.0 for _ in range(self.timestep)]}
                     elif res.get_type() == Storage:
-                        contributions[res.name] = {'generation': res.discharge[self.timestep],
-                                                   'consumption': res.charge[self.timestep]}
+                        contributions[res.name] = {'generation': list(res.discharge[:self.timestep]),
+                                                   'consumption': list(res.charge[:self.timestep])}
                     elif res.get_type() == Vehicle:
-                        contributions[res.name] = {'generation': res.discharge[self.timestep],
-                                                   'consumption': res.charge[self.timestep]}
+                        contributions[res.name] = {'generation': list(res.discharge[:self.timestep]),
+                                                   'consumption': list(res.charge[:self.timestep])}
                     elif res.get_type() == Aggregator:
-                        contributions[res.name] = {'generation': res.imports[self.timestep],
-                                                   'consumption': res.exports[self.timestep]}
+                        contributions[res.name] = {'generation': list(res.imports[:self.timestep]),
+                                                   'consumption': list(res.exports[:self.timestep])}
                     elif res.get_type() == Load:
-                        contributions[res.name] = {'generation': 0.0,
-                                                   'consumption': res.upper_bound[self.timestep]}
+                        contributions[res.name] = {'generation': [0.0 for _ in range(self.timestep)],
+                                                   'consumption': list(res.upper_bound[:self.timestep])}
             else:
                 if self.resources[res_type].get_type() == Generator:
-                    contributions[self.resources[res_type].name] = {'generation': self.resources[res_type].value[self.timestep],
-                                                                    'consumption': 0.0}
+                    contributions[self.resources[res_type].name] = {'generation': list(self.resources[res_type].value[:self.timestep]),
+                                                                    'consumption': [0.0 for _ in range(self.timestep)]}
                 elif self.resources[res_type].get_type() == Storage:
-                    contributions[self.resources[res_type].name] = {'generation': self.resources[res_type].discharge[self.timestep],
-                                                                    'consumption': self.resources[res_type].charge[self.timestep]}
+                    contributions[self.resources[res_type].name] = {'generation': list(self.resources[res_type].discharge[:self.timestep]),
+                                                                    'consumption': list(self.resources[res_type].charge[:self.timestep])}
                 elif self.resources[res_type].get_type() == Vehicle:
-                    contributions[self.resources[res_type].name] = {'generation': self.resources[res_type].discharge[self.timestep],
-                                                                    'consumption': self.resources[res_type].charge[self.timestep]}
+                    contributions[self.resources[res_type].name] = {'generation': list(self.resources[res_type].discharge[:self.timestep]),
+                                                                    'consumption': list(self.resources[res_type].charge[:self.timestep])}
                 elif self.resources[res_type].get_type() == Aggregator:
-                    contributions[self.resources[res_type].name] = {'generation': self.resources[res_type].imports[self.timestep],
-                                                                    'consumption': self.resources[res_type].exports[self.timestep]}
+                    contributions[self.resources[res_type].name] = {'generation': list(self.resources[res_type].imports[:self.timestep]),
+                                                                    'consumption': list(self.resources[res_type].exports[:self.timestep])}
                 elif self.resources[res_type].get_type() == Load:
-                    contributions[self.resources[res_type].name] = {'generation': 0.0,
-                                                                    'consumption': self.resources[res_type].value[self.timestep]}
+                    contributions[self.resources[res_type].name] = {'generation': [0.0 for _ in range(self.timestep)],
+                                                                    'consumption': list(self.resources[res_type].value[:self.timestep])}
 
         return contributions
 
