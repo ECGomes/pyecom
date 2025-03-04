@@ -62,7 +62,7 @@ class ContributionPriority(Priority):
         for resource in self.data:
             temp_priority = initial_priority.loc[initial_priority['name'] ==
                                                  resource.name]['priority'].values[0]
-            self.priorities[resource.name][0] = temp_priority
+            self.priorities.loc[0, resource.name] = temp_priority
 
         return
 
@@ -94,21 +94,21 @@ class ContributionPriority(Priority):
                                self.beta * (np.log(sum(new_data[resource]['consumption']) + 1) / total_consumption)
 
                 # Update the priority of the resource
-                self.priorities[resource][timestep] = contribution
+                self.priorities.loc[timestep, resource] = contribution
 
             else:
                 if total_generation == 0 and total_consumption == 0:
-                    self.priorities[resource][timestep] = 0
+                    self.priorities.loc[timestep, resource] = 0
                 elif total_generation == 0:
-                    self.priorities[resource][timestep] = sum(new_data[resource]['consumption']) / total_consumption
+                    self.priorities.loc[timestep, resource] = sum(new_data[resource]['consumption']) / total_consumption
                 elif total_consumption == 0:
-                    self.priorities[resource][timestep] = sum(new_data[resource]['generation']) / total_generation
+                    self.priorities.loc[timestep, resource] = sum(new_data[resource]['generation']) / total_generation
                 else:
                     # Calculate the contribution of the resource
                     contribution = self.alpha * (sum(new_data[resource]['generation']) / total_generation) + \
                                    self.beta * (sum(new_data[resource]['consumption']) / total_consumption)
 
                     # Update the priority of the resource
-                    self.priorities[resource][timestep] = contribution
+                    self.priorities.loc[timestep, resource] = contribution
 
         return
