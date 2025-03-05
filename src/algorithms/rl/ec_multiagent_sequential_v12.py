@@ -36,7 +36,7 @@ class EnergyCommunitySequentialV12(MultiAgentEnv):
     - Removed option to charge storage and EVs from other storages and EVs. Only renewable and grid energy can be used.
     """
 
-    metadata = {'name': 'EnergyCommunitySequential-v10'}
+    metadata = {'name': 'EnergyCommunitySequential-v12'}
 
     def __init__(self,
                  ren_generators: list[Generator],
@@ -399,7 +399,7 @@ class EnergyCommunitySequentialV12(MultiAgentEnv):
                 discharge = to_discharge / storage.discharge_max[self.timestep]
 
             # Update the available energy
-            self.available_energy += to_discharge
+            self.available_energy += (to_discharge * storage.discharge_efficiency)
 
         # Update the cost
         cost += (to_charge * storage.cost_charge[self.timestep]) - (to_discharge * storage.cost_discharge[self.timestep])
@@ -654,7 +654,7 @@ class EnergyCommunitySequentialV12(MultiAgentEnv):
                     charge = 0.0
                     to_charge = 0.0
 
-                elif ev.value[self.timestep] + to_charge / ev.capacity_max > 1.0:
+                elif ev.value[self.timestep] + (to_charge / ev.capacity_max) > 1.0:
                     # If we cannot charge fully, charge the maximum possible
                     to_charge = np.round(abs((1.0 - ev.value[self.timestep]) * ev.capacity_max), 4)
                     charge = to_charge / ev.schedule_charge[self.timestep]
@@ -684,7 +684,7 @@ class EnergyCommunitySequentialV12(MultiAgentEnv):
 
 
                 # Update the available energy
-                self.available_energy += to_discharge
+                self.available_energy += (to_discharge * ev.discharge_efficiency)
 
         # Update the cost
         cost += (to_charge * ev.cost_charge[self.timestep]) - (to_discharge * ev.cost_discharge[self.timestep])
@@ -761,7 +761,7 @@ class EnergyCommunitySequentialV12(MultiAgentEnv):
 
             if energy_to_import > self.aggregator.import_max[self.timestep]:
                 # Attribute penalty
-                penalty = self.balance_penalty * (energy_to_import - self.aggregator.import_max[self.timestep])
+                penalty += self.balance_penalty * (energy_to_import - self.aggregator.import_max[self.timestep])
 
                 energy_to_import = self.aggregator.import_max[self.timestep]
 
@@ -827,9 +827,6 @@ class EnergyCommunitySequentialV12(MultiAgentEnv):
                     current_res = [res for res in self.storages if res.name == agent_name][0]
                     cost, penalty = self.__execute_storage_actions__(current_res, actions)
 
-                    self.costs[agent_name].append(cost)
-                    self.penalties[agent_name].append(penalty)
-
                     if self.timestep % 24 == 23:
 
                         # Storages should finish with at least 50% SoC
@@ -840,6 +837,9 @@ class EnergyCommunitySequentialV12(MultiAgentEnv):
                         storage_changes = [abs(current_res.value[i] - current_res.value[i - 1]) for i in range(1, 24)]
                         if sum(storage_changes) < 0.3:  # | (current_res.value[self.timestep] < 0.5):
                             penalty += self.storage_penalty
+
+                    self.costs[agent_name].append(cost)
+                    self.penalties[agent_name].append(penalty)
 
                 elif agent_name.startswith('ev'):
                     current_res = [res for res in self.evs if res.name == agent_name][0]
@@ -852,7 +852,6 @@ class EnergyCommunitySequentialV12(MultiAgentEnv):
                     # Add the current energy balance to the history for debug
                     self.energy_history.append(self.available_energy)
                     cost, penalty = self.__execute_aggregator__()
-
 
                     self.costs[agent_name].append(cost)
                     self.penalties[agent_name].append(penalty)
@@ -896,7 +895,7 @@ class EnergyCommunitySequentialV12(MultiAgentEnv):
                         self.available_energy = 0.0
 
                         # Update the pool with the sum of loads
-                        self.available_energy = -self.load_consumption[self.timestep] + self.gen_production[self.timestep]
+                        self.available_energy = self.gen_production[self.timestep] - self.load_consumption[self.timestep]
 
                 # Next observation
                 observations = self._get_observations()

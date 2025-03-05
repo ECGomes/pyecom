@@ -827,38 +827,35 @@ class EnergyCommunityBaselineV6(MultiAgentEnv):
         energy_to_import: float = 0.0
 
         # Check the current energy balance
-        if self.available_energy > 0:
+        if self.available_energy > 0.0:
             # Then we have too much energy and need to export
 
             # Calculate the energy to be exported
             energy_to_export = deepcopy(self.available_energy)
 
             if energy_to_export > self.aggregator.export_max[self.timestep]:
+                # Attribute penalty
+                penalty += self.balance_penalty * (energy_to_export - self.aggregator.export_max[self.timestep])
+
                 energy_to_export = self.aggregator.export_max[self.timestep]
 
-                # Calculate the deviation
-                deviation = self.available_energy - energy_to_export
-
-                # Calculate the penalty
-                penalty = self.balance_penalty
-
             # Calculate the cost
-            cost = - abs(energy_to_export * self.aggregator.export_cost[self.timestep])
+            cost = - np.round(abs(energy_to_export * self.aggregator.export_cost[self.timestep]), 4)
 
-        elif self.available_energy < 0:
+        elif self.available_energy < 0.0:
             # Then we need to import energy
 
             # Calculate the energy to be imported
             energy_to_import = deepcopy(abs(self.available_energy))
 
             if energy_to_import > self.aggregator.import_max[self.timestep]:
+                # Attribute penalty
+                penalty += self.balance_penalty * (energy_to_import - self.aggregator.import_max[self.timestep])
+
                 energy_to_import = self.aggregator.import_max[self.timestep]
 
-                # Calculate the penalty
-                penalty = self.balance_penalty
-
             # Calculate the cost
-            cost = abs(energy_to_import * self.aggregator.import_cost[self.timestep])
+            cost = np.round(abs(energy_to_import * self.aggregator.import_cost[self.timestep]), 4)
 
         # Update resource values
         self.aggregator.imports[self.timestep] = energy_to_import
@@ -912,6 +909,17 @@ class EnergyCommunityBaselineV6(MultiAgentEnv):
                 if key.startswith('storage'):
                     current_res = [res for res in self.storages if res.name == key][0]
                     cost, penalty = self.__execute_storage_actions__(current_res, actions)
+
+                    if self.timestep % 24 == 23:
+
+                        # Storages should finish with at least 50% SoC
+                        if current_res.value[self.timestep] < 0.5:
+                            penalty += self.storage_penalty
+
+                        # Check if there is a minimum of 30% use of SoC throughout the day
+                        storage_changes = [abs(current_res.value[i] - current_res.value[i - 1]) for i in range(1, 24)]
+                        if sum(storage_changes) < 0.3:  # | (current_res.value[self.timestep] < 0.5):
+                            penalty += self.storage_penalty
 
                     self.costs[key].append(cost)
                     self.penalties[key].append(penalty)

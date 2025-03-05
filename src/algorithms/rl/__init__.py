@@ -37,6 +37,5 @@ from .ec_contribution_priority_v1 import EnergyCommunityContributionPriorityV1
 from .ec_contribution_priority_v2 import EnergyCommunityContributionPriorityV2
 from .ec_contribution_priority_v3 import EnergyCommunityContributionPriorityV3
 from .ec_contribution_priority_v4 import EnergyCommunityContributionPriorityV4
-from .ec_contribution_priority_v5 import EnergyCommunityContributionPriorityV5
 
 from .utils import *

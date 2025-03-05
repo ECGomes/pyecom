@@ -760,7 +760,7 @@ class EnergyCommunityContributionPriorityV4(MultiAgentEnv):
                 energy_to_export = self.aggregator.export_max[self.timestep]
 
             # Calculate the cost
-            cost = - np.round(abs(energy_to_export * self.aggregator.export_cost[self.timestep]), 4)
+            cost -= np.round(abs(energy_to_export * self.aggregator.export_cost[self.timestep]), 4)
 
         elif self.available_energy < 0.0:
             # Then we need to import energy
@@ -770,12 +770,12 @@ class EnergyCommunityContributionPriorityV4(MultiAgentEnv):
 
             if energy_to_import > self.aggregator.import_max[self.timestep]:
                 # Attribute penalty
-                penalty = self.balance_penalty * (energy_to_import - self.aggregator.import_max[self.timestep])
+                penalty += self.balance_penalty * (energy_to_import - self.aggregator.import_max[self.timestep])
 
                 energy_to_import = self.aggregator.import_max[self.timestep]
 
             # Calculate the cost
-            cost = np.round(abs(energy_to_import * self.aggregator.import_cost[self.timestep]), 4)
+            cost += np.round(abs(energy_to_import * self.aggregator.import_cost[self.timestep]), 4)
 
         # Update resource values
         self.aggregator.imports[self.timestep] = energy_to_import
@@ -836,9 +836,6 @@ class EnergyCommunityContributionPriorityV4(MultiAgentEnv):
                     current_res = [res for res in self.storages if res.name == agent_name][0]
                     cost, penalty = self.__execute_storage_actions__(current_res, actions)
 
-                    self.costs[agent_name].append(cost)
-                    self.penalties[agent_name].append(penalty)
-
                     if self.timestep % 24 == 23:
 
                         # Storages should finish with at least 50% SoC
@@ -850,6 +847,9 @@ class EnergyCommunityContributionPriorityV4(MultiAgentEnv):
                         if sum(storage_changes) < 0.3:  # | (current_res.value[self.timestep] < 0.5):
                             penalty += self.storage_penalty
 
+                    self.costs[agent_name].append(cost)
+                    self.penalties[agent_name].append(penalty)
+
                 elif agent_name.startswith('ev'):
                     current_res = [res for res in self.evs if res.name == agent_name][0]
                     cost, penalty = self.__execute_ev_actions__(current_res, actions)
@@ -857,35 +857,10 @@ class EnergyCommunityContributionPriorityV4(MultiAgentEnv):
                     self.costs[agent_name].append(cost)
                     self.penalties[agent_name].append(penalty)
 
-
-                    # self.episode_penalties.append(penalty)
                 elif agent_name.startswith('aggregator'):
                     # Add the current energy balance to the history for debug
                     self.energy_history.append(self.available_energy)
                     cost, penalty = self.__execute_aggregator__()
-
-                    # self.episode_costs.append(cost)
-                    self.episode_penalties.append(penalty)
-
-                    ''''
-                    # Calculate self sufficiency
-                    ss = sum([gen.value[self.timestep] for gen in self.generators]) + \
-                        sum(ev.discharge[self.timestep] * ev.discharge_efficiency for ev in self.evs) + \
-                        sum(storage.discharge[self.timestep] * storage.discharge_efficiency for storage in self.storages)
-                    ss = ss / (ss + self.aggregator.exports[self.timestep]) \
-                        if ss + self.aggregator.exports[self.timestep] > 0 else 0.0
-
-                    # Calculate self consumption
-                    sc = self.load_consumption[self.timestep] + \
-                        sum(ev.charge[self.timestep] for ev in self.evs) + \
-                        sum(storage.charge[self.timestep] for storage in self.storages)
-                    sc = sc / (sc + self.aggregator.imports[self.timestep]) \
-                        if sc + self.aggregator.imports[self.timestep] > 0 else 0.0
-
-                    cost = 2 * (ss * sc) / (ss + sc) if ss + sc > 0 else 0.0
-                    '''
-
-                    self.episode_costs.append(cost)
 
                     self.costs[agent_name].append(cost)
                     self.penalties[agent_name].append(penalty)
@@ -897,17 +872,10 @@ class EnergyCommunityContributionPriorityV4(MultiAgentEnv):
 
                         for current_agent in self.agents:
                             reward[current_agent] = - total_costs - total_penalties
-                        self.episode_costs = []
-                        self.episode_penalties = []
 
                         # Reset the costs and penalties
                         self.costs = {agent: [] for agent in self.agents}
                         self.penalties = {agent: [] for agent in self.agents}
-
-
-                # Calculate the reward
-                # reward[agent_name] = - np.round(cost, 4) - np.round(penalty, 4)
-                # reward[agent_name] = np.round(cost, 4) - np.round(penalty, 4)
 
                 # Update the agent execution
                 self.executed_agents[self._current_agent_idx] = True
@@ -924,21 +892,9 @@ class EnergyCommunityContributionPriorityV4(MultiAgentEnv):
                     # Reset the execution order
                     self.executed_agents = [False for _ in range(len(self.execution_order))]
 
-                    # Reset the accumulated costs and penalties
-                    # self.episode_costs = []
-                    # self.episode_penalties = []
-
                     # Check for episode end
                     if self.timestep == self.loads[0].value.shape[0] - 1:
                         terminateds, truncateds = self._log_ending(True)
-
-                        ## Calculate the reward
-                        #reward['aggregator'] = - np.round(np.sum(self.episode_costs), 4) - np.round(
-                        #    np.sum(self.episode_penalties), 4)
-
-                        #self.episode_costs = []
-                        #self.episode_penalties = []
-
                         return {}, reward, terminateds, truncateds, {}
                     else:
                         # Update the timestep
