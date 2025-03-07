@@ -53,9 +53,13 @@ class EnergyCommunityBaselineV6(MultiAgentEnv):
                  storage_penalty: float = 1.0,
                  ev_penalty: float = 1.0,
                  balance_penalty: float = 1.0,
-                 look_ahead: int = 3
+                 look_ahead: int = 3,
+                 seed: int | None = None
                  ):
         super().__init__()
+
+        # Set the seed
+        self.seed = seed if seed is not None else np.random.randint(0, 1000)
 
         # Initialize the resources and the environment
         self.original_resources = {'ren_generators': ren_generators,
@@ -916,11 +920,6 @@ class EnergyCommunityBaselineV6(MultiAgentEnv):
                         if current_res.value[self.timestep] < 0.5:
                             penalty += self.storage_penalty
 
-                        # Check if there is a minimum of 30% use of SoC throughout the day
-                        storage_changes = [abs(current_res.value[i] - current_res.value[i - 1]) for i in range(1, 24)]
-                        if sum(storage_changes) < 0.3:  # | (current_res.value[self.timestep] < 0.5):
-                            penalty += self.storage_penalty
-
                     self.costs[key].append(cost)
                     self.penalties[key].append(penalty)
 
@@ -940,8 +939,10 @@ class EnergyCommunityBaselineV6(MultiAgentEnv):
 
                     if self.timestep % 24 == 23:
 
-                        total_costs = sum([sum(self.costs[agent]) for agent in self.agents]) / len(self.agents)
-                        total_penalties = sum([sum(self.penalties[agent]) for agent in self.agents]) / len(self.agents)
+                        total_costs = (sum([sum(self.costs[agent]) for agent in self.agents])
+                                       / len(self.agents))
+                        total_penalties = sum([sum(self.penalties[agent]) for agent in self.agents]) \
+                                          / len(self.agents)
 
                         for current_agent in self.agents:
                             reward[current_agent] = - total_costs - total_penalties

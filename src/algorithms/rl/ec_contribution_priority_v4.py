@@ -35,8 +35,12 @@ class EnergyCommunityContributionPriorityV4(MultiAgentEnv):
                  ev_penalty: float = 1.0,
                  balance_penalty: float = 1.0,
                  look_ahead: int = 3,
+                 seed: int | None = None,
                  ):
         super().__init__()
+
+        # Set the seed
+        self.seed = seed if seed is not None else np.random.randint(0, 1000)
 
         # Initialize the resources and the environment
         self.original_resources = {'ren_generators': ren_generators,
@@ -45,10 +49,6 @@ class EnergyCommunityContributionPriorityV4(MultiAgentEnv):
                                    'evs': evs,
                                    'generators': generators,
                                    'aggregator': aggregator}
-
-        # Episode costs and penalties
-        self.episode_costs = []
-        self.episode_penalties = []
 
         # Look-ahead settings for agents
         self.look_ahead = look_ahead if look_ahead > 1 else 1
@@ -77,10 +77,6 @@ class EnergyCommunityContributionPriorityV4(MultiAgentEnv):
 
         # Define the resources
         self.resources = deepcopy(self.original_resources)
-
-        # Reset the episode costs and penalties
-        self.episode_costs = []
-        self.episode_penalties = []
 
         self.ren_generators: list[Generator] = self.resources['ren_generators']
         self.loads: list[Load] = self.resources['loads']
@@ -118,8 +114,6 @@ class EnergyCommunityContributionPriorityV4(MultiAgentEnv):
                                 (not agent.startswith('ren_gen'))]
         self.execution_order.append('aggregator')
 
-        # We'll prepend the renewable generators. Order is not important for them.
-        # self.execution_order = [ren_gen.name for ren_gen in self.ren_generators] + self.execution_order
         self.executed_agents = [False for _ in range(len(self.execution_order))]
 
         # Available overall and renewable energy for current timestep
@@ -842,11 +836,6 @@ class EnergyCommunityContributionPriorityV4(MultiAgentEnv):
                         if current_res.value[self.timestep] < 0.5:
                             penalty += self.storage_penalty
 
-                        # Check if there is a minimum of 30% use of SoC throughout the day
-                        storage_changes = [abs(current_res.value[i] - current_res.value[i - 1]) for i in range(1, 24)]
-                        if sum(storage_changes) < 0.3:  # | (current_res.value[self.timestep] < 0.5):
-                            penalty += self.storage_penalty
-
                     self.costs[agent_name].append(cost)
                     self.penalties[agent_name].append(penalty)
 
@@ -867,8 +856,10 @@ class EnergyCommunityContributionPriorityV4(MultiAgentEnv):
 
                     if self.timestep % 24 == 23:
 
-                        total_costs = sum([sum(self.costs[agent]) for agent in self.agents]) / len(self.agents)
-                        total_penalties = sum([sum(self.penalties[agent]) for agent in self.agents]) / len(self.agents)
+                        total_costs = (sum([sum(self.costs[agent]) for agent in self.agents])
+                                       / len(self.agents))
+                        total_penalties = sum([sum(self.penalties[agent]) for agent in self.agents]) \
+                                          / len(self.agents)
 
                         for current_agent in self.agents:
                             reward[current_agent] = - total_costs - total_penalties

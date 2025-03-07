@@ -55,7 +55,8 @@ temp_env = EnergyCommunityContributionPriorityV4(ren_generators=dataset_resource
                                                  storage_penalty=1,
                                                  ev_penalty=1,
                                                  balance_penalty=1,
-                                                 look_ahead=12)
+                                                 look_ahead=12,
+                                                 seed=42)
 temp_env.reset()
 terminations = truncations = {a: False for a in temp_env.agents}
 terminations['__all__'] = False
@@ -153,7 +154,8 @@ env = EnergyCommunityContributionPriorityV4(ren_generators=temp_resources[:5],
                                             storage_penalty=STORAGE_ACTION_PENALTY,
                                             ev_penalty=EV_REQUIREMENT_PENALTY,
                                             balance_penalty=BALANCE_PENALTY,
-                                            look_ahead=12)
+                                            look_ahead=12,
+                                            seed=42)
 register_env("EC_Contrib_V4", lambda config: env)
 
 # Define the PPOConfig
