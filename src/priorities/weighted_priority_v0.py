@@ -10,12 +10,12 @@ import pandas as pd
 class WeightedPriorityV0(Priority):
     """
     Class to calculate the priority of resources in the environment
-    based on their urgency, SoC range.
+    based on their urgency, current available capacity.
     """
 
     def __init__(self, data,
                  urgency_weight: float = 1.0,
-                 soc_weight: float = 0.5,
+                 capacity_weight: float = 0.5,
                  log_scaling: bool = False):
         super().__init__(data)
         self.data = copy.deepcopy(data)
@@ -25,7 +25,7 @@ class WeightedPriorityV0(Priority):
 
         # Weights for the different factors
         self.urgency_weight = urgency_weight
-        self.soc_weight = soc_weight
+        self.capacity_weight = capacity_weight
 
         # Log scaling
         self.log_scaling = log_scaling
@@ -52,22 +52,23 @@ class WeightedPriorityV0(Priority):
         {
             'resource_name': {
                 'urgency': int,
-                'soc_range': float
+                'capacity': float
             }
         }
         """
 
         # Update the resources
         for resource in new_data.keys():
-
             if self.log_scaling:
                 self.priorities.loc[timestep, resource] = \
                     np.log(new_data[resource]['urgency'] + 1) * self.urgency_weight + \
-                    np.log(new_data[resource]['soc_range'] + 1) * self.soc_weight
+                    np.log(new_data[resource]['capacity'] + 1) * self.capacity_weight
 
             else:
                 self.priorities.loc[timestep, resource] = \
                     new_data[resource]['urgency'] * self.urgency_weight + \
-                    new_data[resource]['soc_range'] * self.soc_weight
+                    new_data[resource]['capacity'] * self.capacity_weight
+
+            # print(f"Resource {resource} updated with urgency {new_data[resource]['urgency']} and capacity {new_data[resource]['capacity']} at timestep {timestep}.")
 
         return

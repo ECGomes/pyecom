@@ -39,4 +39,6 @@ from .ec_contribution_priority_v2 import EnergyCommunityContributionPriorityV2
 from .ec_contribution_priority_v3 import EnergyCommunityContributionPriorityV3
 from .ec_contribution_priority_v4 import EnergyCommunityContributionPriorityV4
 
+from .ec_weighted_priority_v0 import EnergyCommunityWeightedPriorityV0
+
 from .utils import *
