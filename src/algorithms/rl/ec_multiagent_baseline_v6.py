@@ -611,17 +611,17 @@ class EnergyCommunityBaselineV6(MultiAgentEnv):
             self.evs[idx].discharge[self.timestep] = 0.0
 
             # Check if the there is a trip and if EV meets the energy requirement for the departure
-            if self.evs[idx].schedule_requirement_soc[self.timestep] > 0:
+            if self.evs[idx].schedule_requirement_soc[self.timestep] > 0.0:
 
                 next_departure_soc = ev.schedule_requirement_soc[self.timestep]
 
-                if ev.value[self.timestep] < next_departure_soc / ev.capacity_max:
+                if (ev.value[self.timestep] - 0.2) < (next_departure_soc / ev.capacity_max):
                     # Attribute penalty
-                    penalty = self.ev_penalty
+                    penalty += self.ev_penalty
 
                     # Discharge the EV with the possible energy
-                    ev.value[self.timestep] = 0.0
-                    self.evs[idx].value[self.timestep] = 0.0
+                    ev.value[self.timestep] = 0.2
+                    self.evs[idx].value[self.timestep] = 0.2
 
                 else:
                     new_ev_val = ev.value[self.timestep] - (next_departure_soc / ev.capacity_max)
@@ -937,19 +937,18 @@ class EnergyCommunityBaselineV6(MultiAgentEnv):
                     self.costs[key].append(cost)
                     self.penalties[key].append(penalty)
 
-                    if self.timestep % 24 == 23:
+                    aggregator_cost = sum(self.costs[key])
+                    aggregator_penalty = sum(self.penalties[key])
+                    reward[key] = - aggregator_cost - aggregator_penalty
 
-                        total_costs = (sum([sum(self.costs[agent]) for agent in self.agents])
-                                       / len(self.agents))
-                        total_penalties = sum([sum(self.penalties[agent]) for agent in self.agents]) \
-                                          / len(self.agents)
+                    # Assign the rewards for every agent except the aggregator
+                    for current_agent in [agent for agent in self.agents if agent != 'aggregator']:
+                        reward[current_agent] = - sum(self.costs[current_agent]) - sum(self.penalties[current_agent]) \
+                                                - aggregator_cost - aggregator_penalty
 
-                        for current_agent in self.agents:
-                            reward[current_agent] = - total_costs - total_penalties
-
-                        # Reset the costs and penalties
-                        self.costs = {agent: [] for agent in self.agents}
-                        self.penalties = {agent: [] for agent in self.agents}
+                    # Reset the costs and penalties
+                    self.costs = {agent: [] for agent in self.agents}
+                    self.penalties = {agent: [] for agent in self.agents}
 
 
             # Check for episode end

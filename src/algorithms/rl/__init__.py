@@ -23,6 +23,7 @@ from .ec_multiagent_sequential_v9 import EnergyCommunitySequentialV9
 from .ec_multiagent_sequential_v10 import EnergyCommunitySequentialV10
 from .ec_multiagent_sequential_v11 import EnergyCommunitySequentialV11
 from .ec_multiagent_sequential_v12 import EnergyCommunitySequentialV12
+from .ec_multiagent_sequential_v13 import EnergyCommunitySequentialV13
 
 from .ec_multiagent_baseline_v0 import EnergyCommunityBaselineV0
 from .ec_multiagent_baseline_v1 import EnergyCommunityBaselineV1

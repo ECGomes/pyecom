@@ -48,7 +48,7 @@ class EmpiricalPriority(Priority):
     def calculate_resource_size_priority(self, type: BaseResource):
         """
         Calculate the priority of individual resources within a group
-        General ideia is that the group priority defines the integer part and
+        General idea is that the group priority defines the integer part and
         the resource size defines the decimal part
         """
 
@@ -107,8 +107,6 @@ class EmpiricalPriority(Priority):
         # Calculate the priority of the resources
         for type in df['type'].unique():
             priority = self.calculate_resource_size_priority(type)
-            #print('priority:', priority)
-            #print(df.loc[df['type'] == type]['priority'])
             df.loc[df['type'] == type, 'priority'] += np.array(priority)
 
         return df

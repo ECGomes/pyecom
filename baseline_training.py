@@ -158,13 +158,14 @@ _config = (PPOConfig()
                      )
            .exploration(exploration_config={})
            .framework('torch')
+           .resources(num_cpus_per_worker=10)
            .multi_agent(policies=policies,
                         policies_to_train=list(policies.keys())[:-1],
                         policy_mapping_fn=(lambda agent_id, episode, worker, **kwargs:
                                            agent_id),
                         algorithm_config_overrides_per_module=model_cfgs)
            .rollouts(batch_mode='complete_episodes', #'complete_episodes',
-                     num_rollout_workers=10,
+                     num_rollout_workers=1,
                      rollout_fragment_length='auto'))
 
 scheduler = AsyncHyperBandScheduler(time_attr="training_iteration",

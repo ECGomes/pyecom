@@ -610,13 +610,13 @@ class EnergyCommunityContributionPriorityV4(MultiAgentEnv):
 
                 next_departure_soc = ev.schedule_requirement_soc[self.timestep]
 
-                if ev.value[self.timestep] < (next_departure_soc / ev.capacity_max):
+                if (ev.value[self.timestep] - 0.2) < (next_departure_soc / ev.capacity_max):
                     # Attribute penalty
                     penalty += self.ev_penalty
 
                     # Discharge the EV with the possible energy
-                    ev.value[self.timestep] = 0.0
-                    self.evs[idx].value[self.timestep] = 0.0
+                    ev.value[self.timestep] = 0.2
+                    self.evs[idx].value[self.timestep] = 0.2
 
                 else:
                     new_ev_val = ev.value[self.timestep] - (next_departure_soc / ev.capacity_max)
@@ -854,19 +854,18 @@ class EnergyCommunityContributionPriorityV4(MultiAgentEnv):
                     self.costs[agent_name].append(cost)
                     self.penalties[agent_name].append(penalty)
 
-                    if self.timestep % 24 == 23:
+                    aggregator_cost = sum(self.costs[agent_name])
+                    aggregator_penalty = sum(self.penalties[agent_name])
+                    reward[agent_name] = - aggregator_cost - aggregator_penalty
 
-                        total_costs = (sum([sum(self.costs[agent]) for agent in self.agents])
-                                       / len(self.agents))
-                        total_penalties = sum([sum(self.penalties[agent]) for agent in self.agents]) \
-                                          / len(self.agents)
+                    # Assign the rewards for every agent except the aggregator
+                    for current_agent in [agent for agent in self.agents if agent != 'aggregator']:
+                        reward[current_agent] = - sum(self.costs[current_agent]) - sum(self.penalties[current_agent]) \
+                                                - aggregator_cost - aggregator_penalty
 
-                        for current_agent in self.agents:
-                            reward[current_agent] = - total_costs - total_penalties
-
-                        # Reset the costs and penalties
-                        self.costs = {agent: [] for agent in self.agents}
-                        self.penalties = {agent: [] for agent in self.agents}
+                    # Reset the costs and penalties
+                    self.costs = {agent: [] for agent in self.agents}
+                    self.penalties = {agent: [] for agent in self.agents}
 
                 # Update the agent execution
                 self.executed_agents[self._current_agent_idx] = True
@@ -879,7 +878,6 @@ class EnergyCommunityContributionPriorityV4(MultiAgentEnv):
 
                 # Check if all agents have been executed
                 if all(self.executed_agents):
-
                     # Reset the execution order
                     self.executed_agents = [False for _ in range(len(self.execution_order))]
 
@@ -891,17 +889,8 @@ class EnergyCommunityContributionPriorityV4(MultiAgentEnv):
                         # Update the timestep
                         self.timestep += 1
 
-                        # Reset energy pools
-                        self.available_energy = 0.0
-                        self.available_ren_energy = 0.0
-                        self.available_stor_energy = 0.0
-                        self.available_ev_energy = 0.0
-
-                        # Update the pool with the sum of loads
-                        self.available_energy = -self.load_consumption[self.timestep] + self.gen_production[
-                            self.timestep]
-                        if self.available_energy > 0:
-                            self.available_ren_energy = self.available_energy
+                        # Update the available energy
+                        self.available_energy = self.gen_production[self.timestep] - self.load_consumption[self.timestep]
 
                         # Calculate the contributions
                         contributions = self.create_contribution_dict()
@@ -916,10 +905,6 @@ class EnergyCommunityContributionPriorityV4(MultiAgentEnv):
                                                 (not agent.startswith('aggregator')) and
                                                 (not agent.startswith('ren_gen'))]
                         self.execution_order.append('aggregator')
-
-                        # We'll prepend the renewable generators. Order is not important for them.
-                        # self.execution_order = [ren_gen.name for ren_gen in self.ren_generators] \
-                        #                        + self.execution_order
 
                         observations = self._get_observations()
                         info = self._log_info()

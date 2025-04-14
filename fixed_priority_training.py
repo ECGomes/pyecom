@@ -4,7 +4,7 @@ import ray
 from ray.rllib.algorithms.ppo import PPOConfig
 
 from src.parsers import HMParser, CotevParser
-from src.algorithms.rl import EnergyCommunitySequentialV12
+from src.algorithms.rl import EnergyCommunitySequentialV13
 
 from src.utils import load_multiple_upacs_pv, iterate_resources, create_ppo_policies
 from src.priorities import EmpiricalPriority
@@ -40,7 +40,7 @@ execution_order = execution_order.calculate_priority()
 order = [x for x in execution_order['name'] if 'load' not in x and 'ren_gen' not in x]
 
 # Create the environment and check if everything is ok
-temp_env = EnergyCommunitySequentialV12(ren_generators=dataset_resources[list(dataset_resources.keys())[0]][:5],
+temp_env = EnergyCommunitySequentialV13(ren_generators=dataset_resources[list(dataset_resources.keys())[0]][:5],
                                         generators=[],
                                         loads=dataset_resources[list(dataset_resources.keys())[0]][5:10],
                                         storages=dataset_resources[list(dataset_resources.keys())[0]][10:13],
@@ -127,7 +127,7 @@ current_best = None
 
 temp_resources = dataset_resources['2019-01']
 
-env = EnergyCommunitySequentialV12(ren_generators=temp_resources[:5],
+env = EnergyCommunitySequentialV13(ren_generators=temp_resources[:5],
                                    generators=[],
                                    loads=temp_resources[5:10],
                                    storages=temp_resources[10:13],
