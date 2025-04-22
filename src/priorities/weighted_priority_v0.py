@@ -7,6 +7,7 @@ from ..resources import (BaseResource, Aggregator, Generator,
 import numpy as np
 import pandas as pd
 
+
 class WeightedPriorityV0(Priority):
     """
     Class to calculate the priority of resources in the environment
