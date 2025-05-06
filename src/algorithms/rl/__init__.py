@@ -41,4 +41,6 @@ from .ec_contribution_priority_v4 import EnergyCommunityContributionPriorityV4
 
 from .ec_weighted_priority_v0 import EnergyCommunityWeightedPriorityV0
 
+from .ec_entropy_priority_v0 import EnergyCommunityEntropyPriorityV0
+
 from .utils import *

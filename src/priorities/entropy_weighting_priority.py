@@ -19,12 +19,18 @@ class EntropyWeightingPriorityV0(Priority):
         self.data = copy.deepcopy(data)
 
         # Priorities initialization
-        self.priorities = None
+        self.priorities = pd.DataFrame({})
 
     def calculate_priority(self):
         pass
 
-    def update_resources(self, new_data: dict):
+    def initialize_priority(self):
+        self.priorities = pd.DataFrame({},
+                                       columns=[x.name for x in self.data],
+                                       index=np.arange(len(self.data[0].value + 1)))
+        return
+
+    def update_resources(self, new_data: dict, timestep: int):
         """
         Update the resources with new data and calculate the priority.
         Dictionary structure:
@@ -76,6 +82,11 @@ class EntropyWeightingPriorityV0(Priority):
         entropy_weights = diversification / diversification.sum()
 
         # Calculate the priority
-        self.priorities = (df * entropy_weights.values).sum(axis=1)
+        priority_values = (df * entropy_weights.values).sum(axis=1)
+
+        # Assign the values according to the timestep
+        for i, resource in enumerate(df.index):
+            self.priorities.loc[timestep, resource] = priority_values[i]
+
 
         return
