@@ -1,8 +1,6 @@
 import copy
 
 from .base_priority import Priority
-from ..resources import (BaseResource, Aggregator, Generator,
-                         Storage, Vehicle, Load)
 
 import numpy as np
 import pandas as pd
@@ -31,62 +29,30 @@ class EntropyWeightingPriorityV0(Priority):
         return
 
     def update_resources(self, new_data: dict, timestep: int):
-        """
-        Update the resources with new data and calculate the priority.
-        Dictionary structure:
-        {
-            'resource_name': {
-                'discharge_cost': float,
-                'charge_cost': float,
-                'soc': float,
-                'connected': bool,
-                'max_discharge_power': float,
-                'max_charge_power': float,
-                'grid_balance': float
-            }
-        }
-        """
+        if not isinstance(new_data, dict) or len(new_data) == 0:
+            raise ValueError("new_data must be a non-empty dictionary")
 
-        # Build a DataFrame with the new data
-        if not isinstance(new_data, dict):
-            raise ValueError("new_data must be a dictionary")
+        # Efficient DataFrame creation
+        df = pd.DataFrame.from_dict(new_data, orient='index')
 
-        if len(new_data) == 0:
-            raise ValueError("new_data cannot be empty")
+        # Vectorized normalization
+        col_min = df.min()
+        col_max = df.max()
+        normalized_df = (df - col_min) / (col_max - col_min + 1e-9)
 
-        df = pd.DataFrame({},
-                          index=list(new_data.keys()),
-                          columns=new_data[list(new_data.keys())[0]].keys())
-        for resource in new_data:
-            for key in new_data[resource]:
-                df.loc[resource, key] = new_data[resource][key]
-
-        # Calculate the priority
-        normalized_df = df.copy()
-        for col in df.columns:
-            col_min = df[col].min()
-            col_max = df[col].max()
-            normalized_df[col] = (df[col] - col_min) / (col_max - col_min + 1e-9)
-
+        # Calculate probability matrix
         p = normalized_df / (normalized_df.sum(axis=0) + 1e-9)
-        p = p.astype(float)
 
-        # Calculate the entropy
+        # Entropy weight calculation
         k = 1 / np.log(len(df))
         entropy = -k * (p * np.log(p + 1e-9)).sum(axis=0)
-
-        # Calculate diversification
         diversification = 1 - entropy
-
-        # Calculate the weights
         entropy_weights = diversification / diversification.sum()
 
-        # Calculate the priority
-        priority_values = (df * entropy_weights.values).sum(axis=1)
+        # Final priority
+        priority_values = (df * entropy_weights).sum(axis=1)
 
-        # Assign the values according to the timestep
-        for i, resource in enumerate(df.index):
-            self.priorities.loc[timestep, resource] = priority_values[i]
-
+        # Assign priorities to the correct timestep
+        self.priorities.loc[timestep, priority_values.index] = priority_values
 
         return
