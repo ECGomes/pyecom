@@ -319,7 +319,8 @@ _config = (PPOConfig()
                         algorithm_config_overrides_per_module=model_cfgs)
            .rollouts(batch_mode='complete_episodes',
                      num_rollout_workers=1,
-                     rollout_fragment_length=128))
+                     rollout_fragment_length=128)
+           .resources(num_cpus_per_worker=10))
 
 # Clear the Jupyter cell output
 IPython.core.display_functions.clear_output()
