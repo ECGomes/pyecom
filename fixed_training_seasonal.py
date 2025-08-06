@@ -32,11 +32,11 @@ data_ec.parse()
 
 # EV data from the EV4EU simulator
 data_ev = CotevParser(population_path=
-                      '/Users/ecgomes/DataspellProjects/pyecom/data/simulation_20evs_1year_15t/population_366.csv',
+                      'data/simulation_20evs_1year_15t/population_366.csv',
                       driving_history_path=
-                      '/Users/ecgomes/DataspellProjects/pyecom/data/simulation_20evs_1year_15t/ev_driving_history_366.csv',
+                      'data/simulation_20evs_1year_15t/ev_driving_history_366.csv',
                       assigned_segments_path=
-                      '/Users/ecgomes/DataspellProjects/pyecom/data/simulation_20evs_1year_15t/assigned_segments_366.csv',
+                      'data/simulation_20evs_1year_15t/assigned_segments_366.csv',
                       parse_date_start='2020',
                       parse_date_end='2020')
 data_ev.parse()
@@ -93,7 +93,7 @@ elif SEASON == 'autumn':
     SEASON_END = autumn_end - 1344
 
 for i in range(1, 21):
-    temp_data = pd.read_csv('/Users/ecgomes/Documents/PhD/housedata/Wh/H{}_Wh.csv'.format(i))
+    temp_data = pd.read_csv('data/housedata/Wh/H{}_Wh.csv'.format(i))
 
     # Fill the generator and load missing data with zeros
     temp_data = temp_data.fillna(0)

@@ -168,3 +168,5 @@ cython_debug/
 /notebooks/seq_paper/
 /notebooks/local_tests/
 /notebooks/priority_paper/
+
+/data/housedata/
