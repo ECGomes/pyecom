@@ -24,6 +24,7 @@ from .ec_multiagent_sequential_v10 import EnergyCommunitySequentialV10
 from .ec_multiagent_sequential_v11 import EnergyCommunitySequentialV11
 from .ec_multiagent_sequential_v12 import EnergyCommunitySequentialV12
 from .ec_multiagent_sequential_v13 import EnergyCommunitySequentialV13
+from .ec_multiagent_sequential_v14 import EnergyCommunitySequentialV14
 
 from .ec_multiagent_baseline_v0 import EnergyCommunityBaselineV0
 from .ec_multiagent_baseline_v1 import EnergyCommunityBaselineV1
@@ -38,9 +39,12 @@ from .ec_contribution_priority_v1 import EnergyCommunityContributionPriorityV1
 from .ec_contribution_priority_v2 import EnergyCommunityContributionPriorityV2
 from .ec_contribution_priority_v3 import EnergyCommunityContributionPriorityV3
 from .ec_contribution_priority_v4 import EnergyCommunityContributionPriorityV4
+from .ec_contribution_priority_v5 import EnergyCommunityContributionPriorityV5
 
 from .ec_weighted_priority_v0 import EnergyCommunityWeightedPriorityV0
+from .ec_weighted_priority_v1 import EnergyCommunityWeightedPriorityV1
 
 from .ec_entropy_priority_v0 import EnergyCommunityEntropyPriorityV0
+from .ec_entropy_priority_v1 import EnergyCommunityEntropyPriorityV1
 
 from .utils import *

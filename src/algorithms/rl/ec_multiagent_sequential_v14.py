@@ -3,19 +3,43 @@ from typing import Union
 
 import gymnasium as gym
 import numpy as np
+from functools import cached_property
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
 
 from src.resources import Generator, Load, Storage, Vehicle, Aggregator
-from src.priorities import WeightedPriorityV0
+from src.priorities import EntropyWeightingPriorityV0
+
+from numba import njit
+
+@njit
+def update_soc(soc, charge_amt, discharge_amt, cap, eff_c, eff_d):
+    return soc + (charge_amt * eff_c - discharge_amt / eff_d) / cap
 
 
-class EnergyCommunityWeightedPriorityV0(MultiAgentEnv):
+class EnergyCommunitySequentialV14(MultiAgentEnv):
     """
-    ContributionPriorityV4 environment with a weighted priority system.
-    Based on available capacity and urgency of the resources.
+    Based on a fixed input order, this environment is designed to
+    simulate an energy community with multiple agents.
+    Reward is given only when a timestep ends
     """
 
-    metadata = {'name': 'EnergyCommunityWeightedPriority-v0'}
+    metadata = {'name': 'EnergyCommunityEntropyPriority-v1'}
+
+    @cached_property
+    def ren_gen_actions(self):
+        return np.round(np.arange(0.0, 1.0, 0.1), 1)
+
+    @cached_property
+    def battery_actions(self):
+        return np.round(np.arange(-1.0, 1.0, 0.1), 1)
+
+    @cached_property
+    def ev_actions(self):
+        return np.round(np.arange(-1.0, 1.0, 0.1), 1)
+
+    @cached_property
+    def gen_actions(self):
+        return np.round(np.arange(0.0, 1.0, 0.1), 1)
 
     def __init__(self,
                  ren_generators: list[Generator],
@@ -24,10 +48,12 @@ class EnergyCommunityWeightedPriorityV0(MultiAgentEnv):
                  evs: list[Vehicle],
                  generators: list[Generator],
                  aggregator: Aggregator,
+                 execution_order: list[str],
                  storage_penalty: float = 1.0,
                  ev_penalty: float = 1.0,
                  balance_penalty: float = 1.0,
                  look_ahead: int = 3,
+                 max_episode_length: int = 24,
                  seed: int | None = None,
                  ):
         super().__init__()
@@ -45,21 +71,33 @@ class EnergyCommunityWeightedPriorityV0(MultiAgentEnv):
 
         # Look-ahead settings for agents
         self.look_ahead = look_ahead if look_ahead > 1 else 1
+        self.max_episode_length = max_episode_length if (
+                max_episode_length <= len(self.original_resources['ren_generators'][0].value)) else (
+            len(self.original_resources['ren_generators'][0].value))
+
+        # Initialize timestep
+        self.timestep: int = 0
+
+        # Set the execution order
+        self.execution_order = execution_order
+
+        # Maximum allowed timestep
+        self.max_timestep = min(self.max_episode_length - 1,
+                                len(self.original_resources['ren_generators'][0].value) - 1)
+        self.time_of_day = 0
 
         # Initialize the environment
         self._reset()
+
+        # Create indexes for resources to make it easier to lookup
+        self.ev_index = {ev.name: i for i, ev in enumerate(self.evs)}
+        self.storage_index = {storage.name: i for i, storage in enumerate(self.storages)}
 
         # Possible penalties
         self.storage_penalty = storage_penalty
         self.high_storage_penalty = storage_penalty ** 2  # Penalty for exchange of energy between storages and EVs
         self.ev_penalty = ev_penalty
         self.balance_penalty = balance_penalty
-
-        # Possible storage action vector
-        self.ren_gen_actions = np.round(np.arange(0.0, 1.0, 0.1), 1)
-        self.battery_actions = np.round(np.arange(-1.0, 1.0, 0.1), 1)
-        self.ev_actions = np.round(np.arange(-1.0, 1.0, 0.1), 1)
-        self.gen_actions = np.round(np.arange(0.0, 1.0, 0.1), 1)
 
         # Handle observation and action spaces
         self._handle_observation_space()
@@ -68,15 +106,22 @@ class EnergyCommunityWeightedPriorityV0(MultiAgentEnv):
     # Initialize the environment
     def _reset(self):
 
-        # Define the resources
-        self.resources = deepcopy(self.original_resources)
+        # Reset the timestep and resources if timestep reached max
+        if self.timestep >= self.max_timestep:
+            self.timestep = 0
 
-        self.ren_generators: list[Generator] = self.resources['ren_generators']
-        self.loads: list[Load] = self.resources['loads']
-        self.storages: list[Storage] = self.resources['storages']
-        self.evs: list[Vehicle] = self.resources['evs']
-        self.generators: list[Generator] = self.resources['generators']
-        self.aggregator: Aggregator = self.resources['aggregator']
+        if self.timestep == 0:
+            # Reset the resources
+            self.resources = {
+                k: [deepcopy(r) for r in v] if isinstance(v, list) else deepcopy(v)
+                for k, v in self.original_resources.items()
+            }
+            self.ren_generators: list[Generator] = self.resources['ren_generators']
+            self.loads: list[Load] = self.resources['loads']
+            self.storages: list[Storage] = self.resources['storages']
+            self.evs: list[Vehicle] = self.resources['evs']
+            self.generators: list[Generator] = self.resources['generators']
+            self.aggregator: Aggregator = self.resources['aggregator']
 
         # Sum of loads
         self.load_consumption: np.array = np.sum([load.value for load in self.loads], axis=0)
@@ -86,35 +131,11 @@ class EnergyCommunityWeightedPriorityV0(MultiAgentEnv):
         for ren_gen in self.ren_generators:
             ren_gen.value = ren_gen.upper_bound
 
-        # Timestep counter
-        self.timestep: int = 0
-
-        # Define the execution order
-        self.priority_system = WeightedPriorityV0(self.ren_generators +
-                                                  self.loads +
-                                                  self.storages +
-                                                  self.evs +
-                                                  self.generators +
-                                                  [self.aggregator],
-                                                  urgency_weight=0.6,
-                                                  capacity_weight=0.4,
-                                                  log_scaling=False)
-        self.priority_system.initialize_priority()
-        contributions = self.create_contribution_dict()
-        self.priority_system.update_resources(contributions, self.timestep)
-        self.execution_order = (self.priority_system.priorities.iloc[self.timestep].
-                                sort_values(ascending=False).index)
-
-        # We'll ignore the loads, and force the aggregator to be the last agent
-        self.execution_order = [agent for agent in self.execution_order
-                                if (not agent.startswith('load')) and (not agent.startswith('aggregator')) and
-                                (not agent.startswith('ren_gen'))]
-        self.execution_order.append('aggregator')
-
-        self.executed_agents = [False for _ in range(len(self.execution_order))]
-
         # Available overall and renewable energy for current timestep
         self.available_energy: float = self.gen_production[self.timestep] - self.load_consumption[self.timestep]
+
+        # Set all agents to default state
+        self.executed_agents = [False for _ in range(len(self.execution_order))]
 
         # Create the agents
         self.possible_agents = ['storage', 'ev', 'aggregator']
@@ -132,10 +153,6 @@ class EnergyCommunityWeightedPriorityV0(MultiAgentEnv):
 
         # Energy vector
         self.energy_history = []
-
-        # Initialize the costs of each agent
-        self.costs = {agent: [] for agent in self.agents}
-        self.penalties = {agent: [] for agent in self.agents}
 
     # Create agents
     def __create_agents__(self) -> dict:
@@ -221,10 +238,9 @@ class EnergyCommunityWeightedPriorityV0(MultiAgentEnv):
                 'maximum_discharge': gym.spaces.Box(low=0, high=99999.0, shape=(1,), dtype=np.float32),
                 'import_prices': gym.spaces.Box(low=0, high=1.0, shape=(self.look_ahead,), dtype=np.float32),
                 'export_prices': gym.spaces.Box(low=0, high=1.0, shape=(self.look_ahead,), dtype=np.float32),
-                'time_of_day': gym.spaces.Box(low=0, high=23, shape=(1,), dtype=np.int32),
+                'time_of_day': gym.spaces.Box(low=0, high=95, shape=(1,), dtype=np.int32),
                 'predicted_production': gym.spaces.Box(low=0, high=99999.0, shape=(self.look_ahead,), dtype=np.float32),
-                'predicted_consumption': gym.spaces.Box(low=0, high=99999.0,
-                                                        shape=(self.look_ahead,), dtype=np.float32),
+                'predicted_consumption': gym.spaces.Box(low=0, high=99999.0, shape=(self.look_ahead,), dtype=np.float32),
                 'priority_score': gym.spaces.Box(low=-99999.0, high=99999.0, shape=(1,), dtype=np.float32)
             })
 
@@ -238,64 +254,43 @@ class EnergyCommunityWeightedPriorityV0(MultiAgentEnv):
         :return: dict
         """
 
-        predicted_production = []
-        predicted_consumption = []
+        predicted_production = np.zeros(self.look_ahead, dtype=np.float32)
+        predicted_consumption = np.zeros(self.look_ahead, dtype=np.float32)
+        import_prices = np.zeros(self.look_ahead, dtype=np.float32)
+        export_prices = np.zeros(self.look_ahead, dtype=np.float32)
 
-        import_prices = []
-        export_prices = []
+        # Check for the lookahead
+        start = self.timestep
+        end = start + self.look_ahead
+        actual_end = min(end, len(self.load_consumption))
 
-        # Check if there are more than self.look_ahead steps remaining
-        if self.timestep + self.look_ahead > len(self.load_consumption):
-
-            # If there are less than n steps remaining, we'll append zeros
-            for i in range(len(self.load_consumption) - self.timestep):
-                predicted_production.append(self.gen_production[self.timestep + i])
-                predicted_consumption.append(self.load_consumption[self.timestep + i])
-
-                import_prices.append(self.aggregator.import_cost[self.timestep + i])
-                export_prices.append(self.aggregator.export_cost[self.timestep + i])
-
-            for i in range(self.look_ahead - len(self.load_consumption) + self.timestep):
-                predicted_production.append(0.0)
-                predicted_consumption.append(0.0)
-
-                import_prices.append(0.0)
-                export_prices.append(0.0)
-
-        else:
-            for i in range(self.look_ahead):
-                predicted_production.append(self.gen_production[self.timestep + i])
-                predicted_consumption.append(self.load_consumption[self.timestep + i])
-
-                import_prices.append(self.aggregator.import_cost[self.timestep + i])
-                export_prices.append(self.aggregator.export_cost[self.timestep + i])
+        predicted_production[:actual_end - start] = self.gen_production[start:actual_end]
+        predicted_consumption[:actual_end - start] = self.load_consumption[start:actual_end]
+        import_prices[:actual_end - start] = self.aggregator.import_cost[start:actual_end]
+        export_prices[:actual_end - start] = self.aggregator.export_cost[start:actual_end]
 
         current_soc = storage.value[self.timestep] if self.timestep > 0 else storage.initial_charge
         current_soc = np.clip(current_soc, 0.0, 1.0)
 
-        current_priority = self.priority_system.priorities.loc[self.timestep, storage.name]
+        current_priority = self._current_agent_idx
 
         storage_observations: dict = {
             'soc': np.array([current_soc],
                             dtype=np.float32),
             'capacity_max': np.array([storage.capacity_max],
-                                     dtype=np.float32),
+                                        dtype=np.float32),
             'available_energy': np.array([self.available_energy],
                                          dtype=np.float32),
             'maximum_charge': np.array([storage.charge_max[self.timestep]],
                                        dtype=np.float32),
             'maximum_discharge': np.array([storage.discharge_max[self.timestep]],
                                           dtype=np.float32),
-            'import_prices': np.array(import_prices,
-                                      dtype=np.float32),
-            'export_prices': np.array(export_prices,
-                                      dtype=np.float32),
-            'time_of_day': np.array([self.timestep % 24],
+            'import_prices': import_prices,
+            'export_prices': export_prices,
+            'time_of_day': np.array([self.time_of_day],
                                     dtype=np.int32),
-            'predicted_production': np.array(predicted_production,
-                                             dtype=np.float32),
-            'predicted_consumption': np.array(predicted_consumption,
-                                              dtype=np.float32),
+            'predicted_production': predicted_production,
+            'predicted_consumption': predicted_consumption,
             'priority_score': np.array([current_priority],
                                        dtype=np.float32)
         }
@@ -339,7 +334,7 @@ class EnergyCommunityWeightedPriorityV0(MultiAgentEnv):
         to_discharge: float = 0.0
 
         # Get the index of the storage
-        idx = [i for i, resource in enumerate(self.storages) if resource.name == storage.name][0]
+        idx = self.storage_index.get(storage.name)
 
         # Check if it is the first timestep
         if self.timestep == 0:
@@ -409,17 +404,19 @@ class EnergyCommunityWeightedPriorityV0(MultiAgentEnv):
             self.available_energy += (to_discharge * storage.discharge_efficiency)
 
         # Update the costs
-        cost += (to_charge * storage.cost_charge[self.timestep]) + (
-                    to_discharge * storage.cost_discharge[self.timestep])
+        cost += (to_charge * storage.cost_charge[self.timestep]) + (to_discharge * storage.cost_discharge[self.timestep])
 
         # Update resource charge and discharge values
         storage.charge[self.timestep] = to_charge  # * storage.charge_efficiency
         storage.discharge[self.timestep] = to_discharge  # / storage.discharge_efficiency
 
         # Update the storage value
-        new_storage_value = storage.value[self.timestep] \
-                            + ((to_charge * storage.charge_efficiency)
-                               - (to_discharge / storage.discharge_efficiency)) / storage.capacity_max
+        new_storage_value = update_soc(storage.value[self.timestep],
+                                       to_charge,
+                                       to_discharge,
+                                       storage.capacity_max,
+                                       storage.charge_efficiency,
+                                       storage.discharge_efficiency)
         new_storage_value = np.round(new_storage_value, 4)
         new_storage_value = np.clip(new_storage_value, 0.0, 1.0)
 
@@ -456,14 +453,15 @@ class EnergyCommunityWeightedPriorityV0(MultiAgentEnv):
                 'maximum_charge': gym.spaces.Box(low=0, high=99999.0, shape=(1,), dtype=np.float32),
                 'maximum_discharge': gym.spaces.Box(low=0, high=99999.0, shape=(1,), dtype=np.float32),
                 'grid_connections': gym.spaces.Box(low=0, high=1, shape=(self.look_ahead,), dtype=np.int32),
-                'next_departure_energy_requirement': gym.spaces.Box(low=0, high=1.0, shape=(1,), dtype=np.float32),
+                'next_departure_energy_requirement': gym.spaces.Box(low=0, high=3.0, shape=(1,), dtype=np.float32),
                 'import_prices': gym.spaces.Box(low=0, high=1.0, shape=(self.look_ahead,), dtype=np.float32),
                 'export_prices': gym.spaces.Box(low=0, high=1.0, shape=(self.look_ahead,), dtype=np.float32),
-                'current_time': gym.spaces.Box(low=0, high=9999, shape=(1,), dtype=np.int32),
-                'predicted_consumption': gym.spaces.Box(low=0, high=99999.0, shape=(self.look_ahead,),
-                                                        dtype=np.float32),
+                'current_time': gym.spaces.Box(low=0, high=95, shape=(1,), dtype=np.int32),
+                'predicted_consumption': gym.spaces.Box(low=0, high=99999.0,
+                                                        shape=(self.look_ahead,), dtype=np.float32),
                 'predicted_production': gym.spaces.Box(low=0, high=99999.0, shape=(self.look_ahead,), dtype=np.float32),
                 'priority_score': gym.spaces.Box(low=-99999.0, high=99999.0, shape=(1,), dtype=np.float32)
+
             })
 
         return ev_observations
@@ -494,54 +492,43 @@ class EnergyCommunityWeightedPriorityV0(MultiAgentEnv):
         """
 
         # Get the next departure time and energy requirement
+        '''
         next_departure = np.where(ev.schedule_requirement_soc > 0)[0]
         next_departure = next_departure[next_departure >= self.timestep]
 
         remains_trips = len(next_departure) > 0
         next_departure_soc = ev.schedule_requirement_soc[next_departure[0]] \
             if remains_trips else ev.min_charge
+        '''
+        future_soc = ev.schedule_requirement_soc[self.timestep:]
+        relative_indices = np.where(future_soc > 0)[0]
 
-        grid_connections = []
+        if relative_indices.size > 0:
+            next_departure_soc = future_soc[relative_indices[0]]
+        else:
+            next_departure_soc = ev.min_charge
 
-        predicted_production = []
-        predicted_consumption = []
-
-        import_prices = []
-        export_prices = []
+        grid_connections = np.zeros(self.look_ahead, dtype=np.int32)
+        predicted_production = np.zeros(self.look_ahead, dtype=np.float32)
+        predicted_consumption = np.zeros(self.look_ahead, dtype=np.float32)
+        import_prices = np.zeros(self.look_ahead, dtype=np.float32)
+        export_prices = np.zeros(self.look_ahead, dtype=np.float32)
 
         # Check if there are more than n steps remaining
-        if self.timestep + self.look_ahead > len(self.load_consumption):
+        start = self.timestep
+        end = start + self.look_ahead
+        actual_end = min(end, len(self.load_consumption))
 
-            # If there are less than n steps remaining, we'll append zeros
-            for i in range(len(self.load_consumption) - self.timestep):
-                grid_connections.append(int(ev.schedule_connected[self.timestep + i]))
-
-                predicted_production.append(self.gen_production[self.timestep + i])
-                predicted_consumption.append(self.load_consumption[self.timestep + i])
-
-                import_prices.append(self.aggregator.import_cost[self.timestep + i])
-                export_prices.append(self.aggregator.export_cost[self.timestep + i])
-
-            for i in range(self.look_ahead - len(self.load_consumption) + self.timestep):
-                grid_connections.append(0)
-                predicted_production.append(0.0)
-                predicted_consumption.append(0.0)
-                import_prices.append(0.0)
-                export_prices.append(0.0)
-
-        else:
-            for i in range(self.look_ahead):
-                grid_connections.append(int(ev.schedule_connected[self.timestep + i]))
-                predicted_production.append(self.gen_production[self.timestep + i])
-                predicted_consumption.append(self.load_consumption[self.timestep + i])
-
-                import_prices.append(self.aggregator.import_cost[self.timestep + i])
-                export_prices.append(self.aggregator.export_cost[self.timestep + i])
+        grid_connections[:actual_end - start] = ev.schedule_connected[start:actual_end]
+        predicted_production[:actual_end - start] = self.gen_production[start:actual_end]
+        predicted_consumption[:actual_end - start] = self.load_consumption[start:actual_end]
+        import_prices[:actual_end - start] = self.aggregator.import_cost[start:actual_end]
+        export_prices[:actual_end - start] = self.aggregator.export_cost[start:actual_end]
 
         current_soc = ev.value[self.timestep] if self.timestep > 0 else ev.initial_charge
         current_soc = np.clip(current_soc, 0.0, 1.0)
 
-        current_priority = self.priority_system.priorities.loc[self.timestep, ev.name]
+        current_priority = self._current_agent_idx
 
         ev_observations: dict = {
             'soc': np.array([current_soc],
@@ -554,20 +541,15 @@ class EnergyCommunityWeightedPriorityV0(MultiAgentEnv):
                                        dtype=np.float32),
             'maximum_discharge': np.array([ev.schedule_discharge[self.timestep]],
                                           dtype=np.float32),
-            'grid_connections': np.array(grid_connections,
-                                         dtype=np.int32),
+            'grid_connections': grid_connections,
             'next_departure_energy_requirement': np.array([next_departure_soc / ev.capacity_max],
                                                           dtype=np.float32),
-            'import_prices': np.array(import_prices,
-                                      dtype=np.float32),
-            'export_prices': np.array(export_prices,
-                                      dtype=np.float32),
-            'current_time': np.array([self.timestep],
+            'import_prices': import_prices,
+            'export_prices': export_prices,
+            'current_time': np.array([self.time_of_day],
                                      dtype=np.int32),
-            'predicted_production': np.array(predicted_production,
-                                             dtype=np.float32),
-            'predicted_consumption': np.array(predicted_consumption,
-                                              dtype=np.float32),
+            'predicted_production': predicted_production,
+            'predicted_consumption': predicted_consumption,
             'priority_score': np.array([current_priority],
                                        dtype=np.float32)
         }
@@ -594,7 +576,7 @@ class EnergyCommunityWeightedPriorityV0(MultiAgentEnv):
         to_discharge: float = 0.0
 
         # Get the index of the EV
-        idx = [i for i, resource in enumerate(self.evs) if resource.name == ev.name][0]
+        idx = self.ev_index.get(ev.name)
 
         # Check if it is the first timestep
         if self.timestep == 0:
@@ -703,11 +685,18 @@ class EnergyCommunityWeightedPriorityV0(MultiAgentEnv):
         cost += (to_charge * ev.cost_charge[self.timestep]) + (to_discharge * ev.cost_discharge[self.timestep])
 
         # Update the value of the EV
-        charge_w_eff = np.round(abs(to_charge * ev.charge_efficiency), 4)
-        discharge_w_eff = np.round(abs(to_discharge / ev.discharge_efficiency), 4)
+        # charge_w_eff = np.round(abs(to_charge * ev.charge_efficiency), 4)
+        # discharge_w_eff = np.round(abs(to_discharge / ev.discharge_efficiency), 4)
 
-        ev.value[self.timestep] = ev.value[self.timestep] + (charge_w_eff - discharge_w_eff) / ev.capacity_max
-        self.evs[idx].value[self.timestep] = ev.value[self.timestep]
+        new_ev_value = update_soc(ev.value[self.timestep],
+                                  charge,
+                                  discharge,
+                                  ev.capacity_max,
+                                  ev.charge_efficiency,
+                                  ev.discharge_efficiency)
+
+        ev.value[self.timestep] = new_ev_value
+        self.evs[idx].value[self.timestep] = new_ev_value
         self.evs[idx].charge[self.timestep] = to_charge
         self.evs[idx].discharge[self.timestep] = to_discharge
 
@@ -808,17 +797,8 @@ class EnergyCommunityWeightedPriorityV0(MultiAgentEnv):
     # Step function
     def step(self, action_dict: dict) -> tuple:
 
-        # Initialize costs and penalties
-        cost: float = 0.0
-        penalty: float = 0.0
-
         # Initialize the observations, info and rewards
-        observations = {}
-        info = {}
         reward = {}
-
-        # Truncations and terminations
-        terminateds, truncateds = self._log_ending(False)
 
         # Check for actions
         if len(action_dict) > 0:
@@ -832,50 +812,35 @@ class EnergyCommunityWeightedPriorityV0(MultiAgentEnv):
                 agent_name = self.execution_order[self._current_agent_idx]
                 actions = action_dict[agent_name]
 
-                cost = 0.0
-                penalty = 0.0
-
                 # Dispatch the actions
                 if agent_name.startswith('storage'):
-                    current_res = [res for res in self.storages if res.name == agent_name][0]
+                    current_res = self.storages[self.storage_index[agent_name]]
                     cost, penalty = self.__execute_storage_actions__(current_res, actions)
 
-                    if self.timestep % 24 == 23:
+                    if self.time_of_day == 95:
 
                         # Storages should finish with at least 50% SoC
                         if current_res.value[self.timestep] < 0.5:
                             penalty += self.storage_penalty
 
-                    self.costs[agent_name].append(cost)
-                    self.penalties[agent_name].append(penalty)
+                    reward[agent_name] = -abs(self.available_energy) - cost - penalty
 
                 elif agent_name.startswith('ev'):
-                    current_res = [res for res in self.evs if res.name == agent_name][0]
+                    current_res = self.evs[self.ev_index[agent_name]]
                     cost, penalty = self.__execute_ev_actions__(current_res, actions)
 
-                    self.costs[agent_name].append(cost)
-                    self.penalties[agent_name].append(penalty)
+                    reward[agent_name] = -abs(self.available_energy) - cost - penalty
 
                 elif agent_name.startswith('aggregator'):
                     # Add the current energy balance to the history for debug
                     self.energy_history.append(self.available_energy)
                     cost, penalty = self.__execute_aggregator__()
 
-                    self.costs[agent_name].append(cost)
-                    self.penalties[agent_name].append(penalty)
-
-                    aggregator_cost = sum(self.costs[agent_name])
-                    aggregator_penalty = sum(self.penalties[agent_name])
-                    reward[agent_name] = - aggregator_cost - aggregator_penalty
+                    reward[agent_name] = -abs(self.available_energy) - cost - penalty
 
                     # Assign the rewards for every agent except the aggregator
                     for current_agent in [agent for agent in self.agents if agent != 'aggregator']:
-                        reward[current_agent] = - sum(self.costs[current_agent]) - sum(self.penalties[current_agent]) \
-                                                - aggregator_cost - aggregator_penalty
-
-                    # Reset the costs and penalties
-                    self.costs = {agent: [] for agent in self.agents}
-                    self.penalties = {agent: [] for agent in self.agents}
+                        reward[current_agent] = -1.0 * (cost + penalty)
 
                 # Update the agent execution
                 self.executed_agents[self._current_agent_idx] = True
@@ -892,31 +857,23 @@ class EnergyCommunityWeightedPriorityV0(MultiAgentEnv):
                     self.executed_agents = [False for _ in range(len(self.execution_order))]
 
                     # Check for episode end
-                    if self.timestep == self.loads[0].value.shape[0] - 1:
+                    if self.timestep >= self.max_timestep:
                         terminateds, truncateds = self._log_ending(True)
                         return {}, reward, terminateds, truncateds, {}
                     else:
-                        # Update the available energy
-                        self.available_energy = self.gen_production[self.timestep] - self.load_consumption[
-                            self.timestep]
-
-                        # Calculate the contributions
-                        contributions = self.create_contribution_dict()
-
-                        # Update the timestep - Needs to be called AFTER the value calculations
+                        # Update the timestep
                         self.timestep += 1
+                        self.time_of_day = self.timestep % 96
 
-                        self.priority_system.update_resources(contributions, self.timestep)
+                        # Update the available energy
+                        self.available_energy = self.gen_production[self.timestep] - self.load_consumption[self.timestep]
 
-                        self.execution_order = (self.priority_system.priorities.iloc[self.timestep].
-                                                sort_values(ascending=False).index)
-
-                        # We'll ignore the loads, and force the aggregator to be the last agent
-                        self.execution_order = [agent for agent in self.execution_order
-                                                if (not agent.startswith('load')) and
-                                                (not agent.startswith('aggregator')) and
-                                                (not agent.startswith('ren_gen'))]
-                        self.execution_order.append('aggregator')
+                        if self.time_of_day == 0:
+                            # End the episode and move on
+                            observations = self._get_observations()
+                            info = self._log_info()
+                            terminateds, truncateds = self._log_ending(True)
+                            return observations, reward, terminateds, truncateds, info
 
                         observations = self._get_observations()
                         info = self._log_info()
@@ -928,96 +885,32 @@ class EnergyCommunityWeightedPriorityV0(MultiAgentEnv):
                 terminateds, truncateds = self._log_ending(False)
                 return observations, reward, terminateds, truncateds, info
 
-        elif len(action_dict) == 0:
-            observations = self._get_observations()
-            info = self._log_info()
+        else:
             terminateds, truncateds = self._log_ending(False)
             return {}, {}, terminateds, truncateds, {}
 
-        return observations, reward, terminateds, truncateds, info
-
     def _get_observations(self):
-
-        # Check for the agent type in the execution order
         current_agent_name = self.execution_order[self._current_agent_idx]
-
         observations = {}
 
-        if current_agent_name.startswith('storage'):
-            current_agent = [storage for storage in self.storages if storage.name == current_agent_name][0]
-            observations[current_agent_name] = self.__get_storage_observations__(current_agent)
+        agent_type = current_agent_name.split('_')[0]  # assumes naming like 'storage_X', 'ev_Y'
 
-        elif current_agent_name.startswith('ev'):
-            current_agent = [ev for ev in self.evs if ev.name == current_agent_name][0]
-            observations[current_agent_name] = self.__get_ev_observations__(current_agent)
+        dispatch = {
+            'storage': lambda name: self.__get_storage_observations__(
+                next((s for s in self.storages if s.name == name), None)
+            ),
+            'ev': lambda name: self.__get_ev_observations__(
+                next((ev for ev in self.evs if ev.name == name), None)
+            ),
+            'aggregator': lambda name: self.__get_aggregator_observations__()
+        }
 
-        elif current_agent_name.startswith('aggregator'):
-            observations[current_agent_name] = self.__get_aggregator_observations__()
+        if agent_type in dispatch:
+            obs = dispatch[agent_type](current_agent_name)
+            if obs is not None:
+                observations[current_agent_name] = obs
 
         return observations
-
-    def create_contribution_dict(self):
-        """
-        Create the contribution dictionary for the environment
-        :return: dict
-        """
-
-        contributions = {}
-        for res_type in self.resources.keys():
-            if type(self.resources[res_type]) == list:
-                for res in self.resources[res_type]:
-                    if res.get_type() == Generator:
-                        contributions[res.name] = {'urgency': 0.0,
-                                                   'capacity': 0.0}
-                    elif res.get_type() == Storage:
-                        contributions[res.name] = {'urgency': 0.0,
-                                                   'capacity': (res.value[self.timestep] - 0.2) * res.capacity_max}
-                    elif res.get_type() == Vehicle:
-                        next_departure = np.where(res.schedule_requirement_soc > 0)[0]
-                        next_departure = next_departure[next_departure >= self.timestep]
-                        if len(next_departure) == 0:
-                            next_departure = 0.0  # So there is no urgency
-                        else:
-                            next_departure = (res.value.shape[0] - next_departure[0] + self.timestep) / res.value.shape[0]
-                        contributions[res.name] = {'urgency': next_departure,
-                                                   'capacity': (res.value[self.timestep] - 0.2) * res.capacity_max}
-                    elif res.get_type() == Aggregator:
-                        contributions[res.name] = {'urgency': 0.0,
-                                                   'capacity': 0.0}
-                    elif res.get_type() == Load:
-                        contributions[res.name] = {'urgency': 0.0,
-                                                   'capacity': 0.0}
-            else:
-                if self.resources[res_type].get_type() == Generator:
-                    contributions[self.resources[res_type].name] = {
-                        'urgency': 0.0,
-                        'capacity': 0.0}
-                elif self.resources[res_type].get_type() == Storage:
-                    contributions[self.resources[res_type].name] = {
-                        'urgency': 0.0,
-                        'capacity': (self.resources[res_type].value[self.timestep] - 0.2)
-                                    * self.resources[res_type].capacity_max}
-                elif self.resources[res_type].get_type() == Vehicle:
-                    next_departure = np.where(self.resources[res_type].schedule_requirement_soc > 0)[0]
-                    next_departure = next_departure[next_departure >= self.timestep]
-                    if len(next_departure) == 0:
-                        next_departure = 0.0
-                    else:
-                        next_departure = (self.resources[res_type].value.shape[0] - next_departure[0] + self.timestep) \
-                                         / self.resources[res_type].value.shape[0]
-                    contributions[self.resources[res_type].name] = {
-                        'urgency': next_departure,
-                        'capacity': (self.resources[res_type].value[self.timestep] - 0.2)
-                                    * self.resources[res_type].capacity_max}
-                elif self.resources[res_type].get_type() == Aggregator:
-                    contributions[self.resources[res_type].name] = {
-                        'urgency': 0.0,
-                        'capacity': 0.0}
-                elif self.resources[res_type].get_type() == Load:
-                    contributions[self.resources[res_type].name] = {'urgency': 0.0,
-                                                                    'capacity': 0.0}
-
-        return contributions
 
     # Log the episode truncations and terminations
     def _log_ending(self, flag: bool) -> tuple[dict, dict]:

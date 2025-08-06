@@ -11,14 +11,9 @@ from src.priorities import EntropyWeightingPriorityV0
 
 class EnergyCommunityEntropyPriorityV0(MultiAgentEnv):
     """
-    Takes the EnergyCommmunitySequential-v10 environment and
-    adds a priority system based on the contribution of each
-    resource to the system.
-
-    Contribution mechanism is implemented on the contribution_priority.py file.
-
-    V4 considers sparse rewards.
-    Reward is given only when the episode ends
+    Based on the entropy weighting priority, this environment is designed to
+    simulate an energy community with multiple agents.
+    Reward is given only when a day ends
 
     """
 
@@ -230,7 +225,8 @@ class EnergyCommunityEntropyPriorityV0(MultiAgentEnv):
                 'export_prices': gym.spaces.Box(low=0, high=1.0, shape=(self.look_ahead,), dtype=np.float32),
                 'time_of_day': gym.spaces.Box(low=0, high=23, shape=(1,), dtype=np.int32),
                 'predicted_production': gym.spaces.Box(low=0, high=99999.0, shape=(self.look_ahead,), dtype=np.float32),
-                'predicted_consumption': gym.spaces.Box(low=0, high=99999.0, shape=(self.look_ahead,), dtype=np.float32)
+                'predicted_consumption': gym.spaces.Box(low=0, high=99999.0, shape=(self.look_ahead,), dtype=np.float32),
+                'priority_score': gym.spaces.Box(low=-99999.0, high=99999.0, shape=(1,), dtype=np.float32)
             })
 
         return storage_observations
@@ -278,6 +274,8 @@ class EnergyCommunityEntropyPriorityV0(MultiAgentEnv):
         current_soc = storage.value[self.timestep] if self.timestep > 0 else storage.initial_charge
         current_soc = np.clip(current_soc, 0.0, 1.0)
 
+        current_priority = self.priority_system.priorities.loc[self.timestep, storage.name]
+
         storage_observations: dict = {
             'soc': np.array([current_soc],
                             dtype=np.float32),
@@ -298,7 +296,9 @@ class EnergyCommunityEntropyPriorityV0(MultiAgentEnv):
             'predicted_production': np.array(predicted_production,
                                              dtype=np.float32),
             'predicted_consumption': np.array(predicted_consumption,
-                                              dtype=np.float32)
+                                              dtype=np.float32),
+            'priority_score': np.array([current_priority],
+                                       dtype=np.float32)
         }
 
         return storage_observations
@@ -460,8 +460,11 @@ class EnergyCommunityEntropyPriorityV0(MultiAgentEnv):
                 'import_prices': gym.spaces.Box(low=0, high=1.0, shape=(self.look_ahead,), dtype=np.float32),
                 'export_prices': gym.spaces.Box(low=0, high=1.0, shape=(self.look_ahead,), dtype=np.float32),
                 'current_time': gym.spaces.Box(low=0, high=9999, shape=(1,), dtype=np.int32),
-                'predicted_consumption': gym.spaces.Box(low=0, high=99999.0, shape=(self.look_ahead,), dtype=np.float32),
-                'predicted_production': gym.spaces.Box(low=0, high=99999.0, shape=(self.look_ahead,), dtype=np.float32)
+                'predicted_consumption': gym.spaces.Box(low=0, high=99999.0,
+                                                        shape=(self.look_ahead,), dtype=np.float32),
+                'predicted_production': gym.spaces.Box(low=0, high=99999.0, shape=(self.look_ahead,), dtype=np.float32),
+                'priority_score': gym.spaces.Box(low=-99999.0, high=99999.0, shape=(1,), dtype=np.float32)
+
             })
 
         return ev_observations
@@ -539,6 +542,8 @@ class EnergyCommunityEntropyPriorityV0(MultiAgentEnv):
         current_soc = ev.value[self.timestep] if self.timestep > 0 else ev.initial_charge
         current_soc = np.clip(current_soc, 0.0, 1.0)
 
+        current_priority = self.priority_system.priorities.loc[self.timestep, ev.name]
+
         ev_observations: dict = {
             'soc': np.array([current_soc],
                             dtype=np.float32),
@@ -563,7 +568,9 @@ class EnergyCommunityEntropyPriorityV0(MultiAgentEnv):
             'predicted_production': np.array(predicted_production,
                                              dtype=np.float32),
             'predicted_consumption': np.array(predicted_consumption,
-                                              dtype=np.float32)
+                                              dtype=np.float32),
+            'priority_score': np.array([current_priority],
+                                       dtype=np.float32)
         }
 
         return ev_observations
