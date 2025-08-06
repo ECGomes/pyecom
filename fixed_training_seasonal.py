@@ -346,3 +346,10 @@ results = tuner.fit()
 
 print(results.get_best_result('episode_reward_mean',
                               'max').get_best_checkpoint('episode_reward_mean', 'max').path)
+
+# Write the best checkpoint path and the best result to a file
+with open('best_checkpoint_fixed_training_seasonal.txt', 'w') as f:
+    best_result = results.get_best_result('episode_reward_mean', 'max')
+    best_checkpoint = best_result.get_best_checkpoint('episode_reward_mean', 'max')
+    f.write(f'Best checkpoint path: {best_checkpoint.path}\n')
+    f.write(f'Best episode reward mean: {best_result.metrics["episode_reward_mean"]}\n')
