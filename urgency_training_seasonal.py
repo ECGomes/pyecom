@@ -16,7 +16,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-SEASON = 'summer'  # 'winter', 'spring', 'summer', 'autumn'
+SEASON = 'autumn'  # 'winter', 'spring', 'summer', 'autumn'
 SEASON_START = 0
 SEASON_END = 0
 
@@ -31,11 +31,11 @@ data_ec.parse()
 
 # EV data from the EV4EU simulator
 data_ev = CotevParser(population_path=
-                      '/Users/ecgomes/DataspellProjects/pyecom/data/simulation_20evs_1year_15t/population_366.csv',
+                      'data/simulation_20evs_1year_15t/population_366.csv',
                       driving_history_path=
-                      '/Users/ecgomes/DataspellProjects/pyecom/data/simulation_20evs_1year_15t/ev_driving_history_366.csv',
+                      'data/simulation_20evs_1year_15t/ev_driving_history_366.csv',
                       assigned_segments_path=
-                      '/Users/ecgomes/DataspellProjects/pyecom/data/simulation_20evs_1year_15t/assigned_segments_366.csv',
+                      'data/simulation_20evs_1year_15t/assigned_segments_366.csv',
                       parse_date_start='2020',
                       parse_date_end='2020')
 data_ev.parse()
@@ -75,24 +75,24 @@ autumn_start = aux_date_range.get_loc(aux_date_range[aux_date_range.month == 9].
 autumn_end = aux_date_range.get_loc(aux_date_range[aux_date_range.month == 11].max())
 
 if SEASON == 'winter':
-    N_STEPS = winter_end - winter_start
+    N_STEPS = winter_end - winter_start - 1344
     SEASON_START = winter_start
-    SEASON_END = winter_end
+    SEASON_END = winter_end - 1344
 elif SEASON == 'spring':
-    N_STEPS = spring_end - spring_start
+    N_STEPS = spring_end - spring_start - 1344
     SEASON_START = spring_start
-    SEASON_END = spring_end
+    SEASON_END = spring_end - 1344
 elif SEASON == 'summer':
-    N_STEPS = summer_end - summer_start
+    N_STEPS = summer_end - summer_start - 1344
     SEASON_START = summer_start
-    SEASON_END = summer_end
+    SEASON_END = summer_end - 1344
 elif SEASON == 'autumn':
-    N_STEPS = autumn_end - autumn_start
+    N_STEPS = autumn_end - autumn_start - 1344
     SEASON_START = autumn_start
-    SEASON_END = autumn_end
+    SEASON_END = autumn_end - 1344
 
 for i in range(1, 21):
-    temp_data = pd.read_csv('/Users/ecgomes/Documents/PhD/housedata/Wh/H{}_Wh.csv'.format(i))
+    temp_data = pd.read_csv('data/housedata/Wh/H{}_Wh.csv'.format(i))
 
     # Fill the generator and load missing data with zeros
     temp_data = temp_data.fillna(0)

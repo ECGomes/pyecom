@@ -944,6 +944,9 @@ class EnergyCommunityWeightedPriorityV1(MultiAgentEnv):
         :return: dict
         """
 
+        # Calculate the max capacity for storages and EVs
+        max_capacity = 0.0
+
         contributions = {}
         for res_type in self.resources.keys():
             if type(self.resources[res_type]) == list:
@@ -953,7 +956,8 @@ class EnergyCommunityWeightedPriorityV1(MultiAgentEnv):
                                                    'capacity': 0.0}
                     elif res.get_type() == Storage:
                         contributions[res.name] = {'urgency': 0.0,
-                                                   'capacity': (res.value[self.timestep] - 0.2) * res.capacity_max}
+                                                   'capacity': res.value[self.timestep] * res.capacity_max}
+                        max_capacity = max(max_capacity, res.value[self.timestep] * res.capacity_max)
                     elif res.get_type() == Vehicle:
                         next_departure = np.where(res.schedule_requirement_soc > 0)[0]
                         next_departure = next_departure[next_departure >= self.timestep]
@@ -962,7 +966,8 @@ class EnergyCommunityWeightedPriorityV1(MultiAgentEnv):
                         else:
                             next_departure = (res.value.shape[0] - next_departure[0] + self.timestep) / res.value.shape[0]
                         contributions[res.name] = {'urgency': next_departure,
-                                                   'capacity': (res.value[self.timestep] - 0.2) * res.capacity_max}
+                                                   'capacity': res.value[self.timestep] * res.capacity_max}
+                        max_capacity = max(max_capacity, res.value[self.timestep] * res.capacity_max)
                     elif res.get_type() == Aggregator:
                         contributions[res.name] = {'urgency': 0.0,
                                                    'capacity': 0.0}
@@ -977,8 +982,9 @@ class EnergyCommunityWeightedPriorityV1(MultiAgentEnv):
                 elif self.resources[res_type].get_type() == Storage:
                     contributions[self.resources[res_type].name] = {
                         'urgency': 0.0,
-                        'capacity': (self.resources[res_type].value[self.timestep] - 0.2)
+                        'capacity': self.resources[res_type].value[self.timestep]
                                     * self.resources[res_type].capacity_max}
+                    max_capacity = max(max_capacity, self.resources[res_type].capacity_max)
                 elif self.resources[res_type].get_type() == Vehicle:
                     next_departure = np.where(self.resources[res_type].schedule_requirement_soc > 0)[0]
                     next_departure = next_departure[next_departure >= self.timestep]
@@ -989,8 +995,9 @@ class EnergyCommunityWeightedPriorityV1(MultiAgentEnv):
                                          / self.resources[res_type].value.shape[0]
                     contributions[self.resources[res_type].name] = {
                         'urgency': next_departure,
-                        'capacity': (self.resources[res_type].value[self.timestep] - 0.2)
+                        'capacity': self.resources[res_type].value[self.timestep]
                                     * self.resources[res_type].capacity_max}
+                    max_capacity = max(max_capacity, self.resources[res_type].capacity_max)
                 elif self.resources[res_type].get_type() == Aggregator:
                     contributions[self.resources[res_type].name] = {
                         'urgency': 0.0,
@@ -998,6 +1005,10 @@ class EnergyCommunityWeightedPriorityV1(MultiAgentEnv):
                 elif self.resources[res_type].get_type() == Load:
                     contributions[self.resources[res_type].name] = {'urgency': 0.0,
                                                                     'capacity': 0.0}
+
+        for key in contributions.keys():
+            # Normalize capacity and multiply by 2 to match the urgency possible range
+            contributions[key]['capacity'] /= max_capacity * 0.5 if max_capacity > 0 else 1.0
 
         return contributions
 
@@ -1011,6 +1022,5 @@ class EnergyCommunityWeightedPriorityV1(MultiAgentEnv):
         return terminateds, truncateds
 
     def _log_info(self) -> dict:
-
         # Check if there are keys on the reward
         return {'{}'.format(self.execution_order[self._current_agent_idx]): {}}
