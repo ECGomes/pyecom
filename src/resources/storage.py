@@ -5,23 +5,24 @@ from src.resources.base_resource import BaseResource
 
 from typing import Union
 
+
 class Storage(BaseResource):
     def __init__(self,
                  name: str,
                  value: Union[np.array, float],
-                 lower_bound: np.array,
-                 upper_bound: np.array,
-                 cost: np.array,
-                 cost_discharge: np.array,
-                 cost_charge: np.array,
-                 capacity_max: np.array,
-                 capacity_min: np.array,
-                 initial_charge: np.array,
-                 discharge_efficiency: np.array,
-                 discharge_max: np.array,
-                 charge_efficiency: np.array,
-                 charge_max: np.array,
-                 capital_cost: np.array,
+                 lower_bound: np.array(float),
+                 upper_bound: np.array(float),
+                 cost: np.array(float),
+                 cost_discharge: np.array(float),
+                 cost_charge: np.array(float),
+                 capacity_max: np.array(float),
+                 capacity_min: np.array(float),
+                 initial_charge: np.array(float),
+                 discharge_efficiency: np.array(float),
+                 discharge_max: np.array(float),
+                 charge_efficiency: np.array(float),
+                 charge_max: np.array(float),
+                 capital_cost: np.array(float),
                  ):
         super().__init__(name, value, lower_bound, upper_bound, cost)
 
