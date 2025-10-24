@@ -15,8 +15,8 @@ import torch
 
 
 @njit
-def update_soc(soc, charge_amt, discharge_amt, cap, eff_c, eff_d):
-    return soc + (charge_amt * eff_c - discharge_amt / eff_d) # / cap
+def update_soc(soc, charge_amt, discharge_amt, eff_c, eff_d) -> float:
+    return soc + charge_amt * eff_c - discharge_amt / eff_d
 
 
 def set_seed(seed=None):
@@ -115,6 +115,10 @@ class EnergyCommunityEntropyPriorityV1(MultiAgentEnv):
 
         # Reward accumulation
         self.global_rewards = []
+        self.global_actions = {}
+
+        # Import cost average
+        self.import_cost_mean = np.round(np.mean(self.aggregator.import_cost), 2)
 
     # Initialize the environment
     def _reset(self):
@@ -122,6 +126,8 @@ class EnergyCommunityEntropyPriorityV1(MultiAgentEnv):
         # Reset the timestep and resources if timestep reached max
         if self.timestep >= self.max_timestep:
             self.timestep = 0
+
+        self.time_of_day = self.timestep % 96
 
         if self.timestep == 0:
             # Reset the resources
@@ -296,8 +302,7 @@ class EnergyCommunityEntropyPriorityV1(MultiAgentEnv):
         import_prices[:actual_end - start] = self.aggregator.import_cost[start:actual_end]
         export_prices[:actual_end - start] = self.aggregator.export_cost[start:actual_end]
 
-        current_soc = storage.value[self.timestep] if self.timestep > 0 \
-            else storage.initial_charge * storage.capacity_max
+        current_soc = storage.value[self.timestep - 1] if self.timestep > 0 else storage.initial_charge
         current_soc = np.clip(current_soc, 0.0, storage.capacity_max)
 
         current_priority = self.priority_system.priorities.loc[self.timestep, storage.name]
@@ -313,12 +318,16 @@ class EnergyCommunityEntropyPriorityV1(MultiAgentEnv):
                                        dtype=np.float32),
             'maximum_discharge': np.array([storage.discharge_max[self.timestep]],
                                           dtype=np.float32),
-            'import_prices': import_prices,
-            'export_prices': export_prices,
+            'import_prices': np.array(import_prices,
+                                      dtype=np.float32),
+            'export_prices': np.array(export_prices,
+                                      dtype=np.float32),
             'time_of_day': np.array([self.time_of_day],
                                     dtype=np.int32),
-            'predicted_production': predicted_production,
-            'predicted_consumption': predicted_consumption,
+            'predicted_production': np.array(predicted_production,
+                                             dtype=np.float32),
+            'predicted_consumption': np.array(predicted_consumption,
+                                              dtype=np.float32),
             'priority_score': np.array([current_priority],
                                        dtype=np.float32)
         }
@@ -338,11 +347,11 @@ class EnergyCommunityEntropyPriorityV1(MultiAgentEnv):
 
         storage_actions = {}
         for storage in self.storages:
-            storage_actions[storage.name] = gym.spaces.Discrete(self.battery_actions.shape[0])
-            #storage_actions[storage.name] = gym.spaces.Box(low=-storage.discharge_max[0],
-            #                                               high=storage.charge_max[0],
-            #                                               dtype=np.float32,
-            #                                               shape=(1,))
+            #storage_actions[storage.name] = gym.spaces.Discrete(self.battery_actions.shape[0])
+            storage_actions[storage.name] = gym.spaces.Box(low=-storage.discharge_max[0],
+                                                           high=storage.charge_max[0],
+                                                           dtype=np.float32,
+                                                           shape=(1,))
 
         return storage_actions
 
@@ -360,9 +369,7 @@ class EnergyCommunityEntropyPriorityV1(MultiAgentEnv):
         penalty: float = 0.0
 
         # Initialize charge and discharge
-        charge: float = 0.0
         to_charge: float = 0.0
-        discharge: float = 0.0
         to_discharge: float = 0.0
 
         # Get the index of the storage
@@ -370,14 +377,14 @@ class EnergyCommunityEntropyPriorityV1(MultiAgentEnv):
 
         # Check if it is the first timestep
         if self.timestep == 0:
-            storage.value[self.timestep] = storage.initial_charge * storage.capacity_max
-            self.storages[idx].value[self.timestep] = storage.initial_charge * storage.capacity_max
+            storage.value[self.timestep] = storage.initial_charge
+            self.storages[idx].value[self.timestep] = storage.initial_charge
         else:
             storage.value[self.timestep] = storage.value[self.timestep - 1]
             self.storages[idx].value[self.timestep] = storage.value[self.timestep - 1]
 
-        storage_action = self.battery_actions[actions]
-        # storage_action = np.round(actions[0], 4)
+        #storage_action = self.battery_actions[actions]
+        storage_action = np.round(actions[0], 2)
 
         # Idle state
         if storage_action == 0.0:
@@ -388,104 +395,64 @@ class EnergyCommunityEntropyPriorityV1(MultiAgentEnv):
             self.storages[idx].charge[self.timestep] = 0.0
             self.storages[idx].discharge[self.timestep] = 0.0
 
+            if storage.value[self.timestep] < storage.capacity_min:
+                penalty += (storage.capacity_min - storage.value[self.timestep]) * self.storage_penalty
+
         # Charge state
         elif storage_action > 0.0:
             # Check if we can charge
-            charge: float = storage_action
-            to_charge: float = charge * storage.charge_max[self.timestep]
+            to_charge: float = storage_action #* storage.charge_max[self.timestep]
 
             # Check if we can charge
             if storage.value[self.timestep] >= storage.capacity_max:
                 # We are already at 100%
-                charge = 0.0
+                penalty += to_charge * self.storage_penalty
                 to_charge = 0.0
 
             elif storage.value[self.timestep] + to_charge > storage.capacity_max:
                 # If we cannot charge, charge the maximum possible
-                # penalty = storage.value[self.timestep] * storage.capacity_max + to_charge - storage.capacity_max
+                penalty += (storage.value[self.timestep] + to_charge - storage.capacity_max) * self.storage_penalty
                 to_charge = abs(storage.capacity_max - storage.value[self.timestep])
-                charge = to_charge / storage.capacity_max
 
             to_charge = np.round(to_charge, 4)
-            charge = np.round(charge, 4)
 
         # Discharge state
         elif storage_action < 0.0:
 
-            discharge: float = abs(storage_action)
-            to_discharge: float = discharge * storage.discharge_max[self.timestep]
+            to_discharge: float = abs(storage_action) #* storage.discharge_max[self.timestep]
 
             # Check if we can discharge
-            if storage.value[self.timestep] < storage.capacity_min:
+            if storage.value[self.timestep] <= storage.capacity_min:
                 # If we are already at the minimum charge, we cannot discharge
-                discharge = 0.0
+                penalty += to_discharge * self.storage_penalty
                 to_discharge = 0.0
 
             elif storage.value[self.timestep] - to_discharge \
                     < storage.capacity_min:
                 # If we cannot discharge, discharge the maximum possible
-                # penalty = abs(storage.capacity_min - abs(storage.value[self.timestep] * storage.capacity_max - to_discharge))
+                penalty += abs(storage.capacity_min - abs(storage.value[self.timestep] - to_discharge))
                 to_discharge = storage.value[self.timestep] - storage.capacity_min
-                discharge = to_discharge / storage.discharge_max[self.timestep]
 
-        # Update the costs
-        # cost += (to_charge * (storage.cost_charge[self.timestep] + self.aggregator.import_cost[self.timestep])) \
-        #        - (to_discharge * (storage.cost_discharge[self.timestep] - self.aggregator.export_cost[self.timestep]))
+            to_discharge = np.round(to_discharge, 4)
 
-        '''
-        free_energy = max(self.available_energy, 0.0)
-        to_charge_free = min(free_energy, to_charge)
-        to_charge_paid = max(to_charge - to_charge_free, 0.0)
-
-        cost_storage = (self.aggregator.export_cost[self.timestep] * to_discharge
-                        - self.aggregator.import_cost[self.timestep] * to_charge_paid)
-
-        # Get the cost BEFORE the update to calculate the net cost of the action
-        cost_before = (self.aggregator.export_cost[self.timestep] * max(self.available_energy, 0.0)
-                       + self.aggregator.import_cost[self.timestep] * min(self.available_energy, 0.0))
+        # Calculate the cost before energy pool update
+        cost_before = (self.aggregator.import_cost[self.timestep] * max(-self.available_energy, 0.0) +
+                       self.aggregator.export_cost[self.timestep] * max(self.available_energy, 0.0))
 
         # Update the available energy
         self.available_energy = self.available_energy - to_charge + to_discharge
 
-        # Add another term to discourage discharge when there is production
-        discharge_penalty = max(self.available_energy, 0.0) * self.aggregator.export_cost[self.timestep]
+        # Calculate the cost
+        cost_action = (to_charge * storage.cost_charge[self.timestep]
+                       + to_discharge * storage.cost_discharge[self.timestep])
 
-        # Add another term to encourage charging from production
-        solar_incentive = to_charge_free * self.aggregator.import_cost[self.timestep]
+        cost_after = (self.aggregator.import_cost[self.timestep] * max(-self.available_energy, 0.0) +
+                      self.aggregator.export_cost[self.timestep] * max(self.available_energy, 0.0))
 
-        cost_after = (self.aggregator.export_cost[self.timestep] * max(self.available_energy, 0.0)
-                      + self.aggregator.import_cost[self.timestep] * min(self.available_energy, 0.0))
+        # cost = cost_after - cost_before + 0.01 * self.import_cost_mean * to_discharge
+        cost = cost_after - cost_before + cost_action
 
-        cost = 0.8 * (cost_before - cost_after) + 0.2 * cost_storage + solar_incentive - discharge_penalty
-        '''
-
-        cost = to_charge * storage.cost_charge[self.timestep] + to_discharge * storage.cost_discharge[self.timestep]
-
-        '''
-        if self.available_energy > 0.0 and to_discharge > 0.0:
-            penalty = to_discharge * self.aggregator.import_cost[self.timestep]
-
-        if self.available_energy > 0.0 and to_charge > 0.0:
-            penalty = - to_charge * self.aggregator.import_cost[self.timestep]
-
-        if self.available_energy < 0.0 and to_charge > 0.0:
-            penalty = to_charge * self.aggregator.import_cost[self.timestep]
-
-        if self.available_energy < 0.0 and to_discharge > 0.0:
-            penalty = -to_discharge * self.aggregator.import_cost[self.timestep]
-        '''
-
-        # Reward is energy delta
-        #  energy_before = self.available_energy
-        self.available_energy = self.available_energy - to_charge + to_discharge
-        #  import_cost = self.aggregator.import_cost[self.timestep] * max(-self.available_energy, 0.0)
-        #  export_cost = self.aggregator.export_cost[self.timestep] * max(self.available_energy, 0.0)
-        # cost = (abs(energy_before) - abs(self.available_energy)) * (import_cost + export_cost)
-        # cost = -abs(self.available_energy) * (import_cost + export_cost)
-        # cost = (- min(self.available_energy, 0.0) * import_cost +
-        #        (abs(energy_before) - abs(self.available_energy)) * import_cost)
-
-        # Update resource charge and discharge values
+    # Update resource charge and discharge values
         storage.charge[self.timestep] = to_charge  # * storage.charge_efficiency
         storage.discharge[self.timestep] = to_discharge  # / storage.discharge_efficiency
 
@@ -493,7 +460,6 @@ class EnergyCommunityEntropyPriorityV1(MultiAgentEnv):
         new_storage_value = update_soc(storage.value[self.timestep],
                                        to_charge,
                                        to_discharge,
-                                       storage.capacity_max,
                                        storage.charge_efficiency,
                                        storage.discharge_efficiency)
         new_storage_value = np.round(new_storage_value, 4)
@@ -504,7 +470,7 @@ class EnergyCommunityEntropyPriorityV1(MultiAgentEnv):
         self.storages[idx].charge[self.timestep] = to_charge
         self.storages[idx].discharge[self.timestep] = to_discharge
 
-        return -cost, -penalty
+        return cost, penalty
 
     # Create EV Observation Space
     def __create_ev_obs__(self) -> dict:
@@ -526,8 +492,8 @@ class EnergyCommunityEntropyPriorityV1(MultiAgentEnv):
         ev_observations = {}
         for ev in self.evs:
             ev_observations[ev.name] = gym.spaces.Dict({
-                'soc': gym.spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32),
-                'capacity_max': gym.spaces.Box(low=0.0, high=99999.0, shape=(1,), dtype=np.float32),
+                'soc': gym.spaces.Box(low=0.0, high=ev.capacity_max, shape=(1,), dtype=np.float32),
+                'capacity_max': gym.spaces.Box(low=0.0, high=ev.capacity_max, shape=(1,), dtype=np.float32),
                 'available_energy': gym.spaces.Box(low=-99999.0, high=99999.0, shape=(1,), dtype=np.float32),
                 'maximum_charge': gym.spaces.Box(low=0, high=99999.0, shape=(1,), dtype=np.float32),
                 'maximum_discharge': gym.spaces.Box(low=0, high=99999.0, shape=(1,), dtype=np.float32),
@@ -608,8 +574,8 @@ class EnergyCommunityEntropyPriorityV1(MultiAgentEnv):
         import_prices[:actual_end - start] = self.aggregator.import_cost[start:actual_end]
         export_prices[:actual_end - start] = self.aggregator.export_cost[start:actual_end]
 
-        current_soc = ev.value[self.timestep] if self.timestep > 0 else ev.initial_charge
-        current_soc = np.clip(current_soc, 0.0, 1.0)
+        current_soc = ev.value[self.timestep - 1] if self.timestep > 0 else ev.initial_charge
+        current_soc = np.clip(current_soc, 0.0, ev.capacity_max)
 
         current_priority = self.priority_system.priorities.loc[self.timestep, ev.name]
 
@@ -653,9 +619,7 @@ class EnergyCommunityEntropyPriorityV1(MultiAgentEnv):
         penalty: float = 0.0
 
         # Initialize charge and discharge
-        charge: float = 0.0
         to_charge: float = 0.0
-        discharge: float = 0.0
         to_discharge: float = 0.0
 
         # Get the index of the EV
@@ -663,8 +627,8 @@ class EnergyCommunityEntropyPriorityV1(MultiAgentEnv):
 
         # Check if it is the first timestep
         if self.timestep == 0:
-            ev.value[self.timestep] = ev.initial_charge
-            self.evs[idx].value[self.timestep] = ev.initial_charge
+            ev.value[self.timestep] = ev.initial_charge * ev.capacity_max
+            self.evs[idx].value[self.timestep] = ev.initial_charge * self.evs[idx].capacity_max
 
         else:
             ev.value[self.timestep] = ev.value[self.timestep - 1]
@@ -690,91 +654,73 @@ class EnergyCommunityEntropyPriorityV1(MultiAgentEnv):
 
             # Idle state
             if abs(ev_action) == 0.0:
-                charge = 0.0
-                discharge = 0.0
+                to_charge = 0.0
+                to_discharge = 0.0
 
                 # Update values
-                ev.charge[self.timestep] = charge
-                ev.discharge[self.timestep] = discharge
+                ev.charge[self.timestep] = to_charge
+                ev.discharge[self.timestep] = to_discharge
 
                 # Update resource values
-                self.evs[idx].charge[self.timestep] = charge
-                self.evs[idx].discharge[self.timestep] = discharge
+                self.evs[idx].charge[self.timestep] = to_charge
+                self.evs[idx].discharge[self.timestep] = to_discharge
 
             # Charge state
             elif ev_action > 0.0:
                 # Get the charge value
-                charge = abs(ev_action)
-                to_charge: float = charge * ev.schedule_charge[self.timestep]
-
-                discharge = 0.0
+                to_charge: float = abs(ev_action) * ev.schedule_charge[self.timestep]
                 to_discharge: float = 0.0
 
                 # Check if we can charge
-                if ev.value[self.timestep] >= 1.0:
+                if ev.value[self.timestep] >= ev.capacity_max:
                     # We are already at 100%
-                    charge = 0.0
                     to_charge = 0.0
 
-                elif ev.value[self.timestep] + (to_charge / ev.capacity_max) > 1.0:
+                elif ev.value[self.timestep] + to_charge > ev.capacity_max:
                     # If we cannot charge fully, charge the maximum possible
-                    to_charge = np.round(abs((1.0 - ev.value[self.timestep]) * ev.capacity_max), 4)
-                    charge = to_charge / ev.schedule_charge[self.timestep]
+                    to_charge = np.round(abs(ev.capacity_max - ev.value[self.timestep]), 4)
 
             # Discharge state
             elif ev_action < 0.0:
                 # Get the discharge value
-                discharge: float = abs(ev_action)
-                to_discharge: float = discharge * ev.schedule_discharge[self.timestep]
-
-                charge = 0.0
+                to_discharge: float = abs(ev_action) * ev.schedule_discharge[self.timestep]
                 to_charge: float = 0.0
 
                 # Check if we can discharge
-                if ev.value[self.timestep] <= 0.2:
+                if ev.value[self.timestep] <= ev.min_charge:
                     # If we are already at the minimum charge, we cannot discharge
-                    discharge = 0.0
                     to_discharge = 0.0
 
-                elif (ev.value[self.timestep] - to_discharge / ev.capacity_max) < 0.2:
+                elif ev.value[self.timestep] - to_discharge < ev.min_charge:
                     # If we cannot discharge, discharge the maximum possible
-                    to_discharge = abs(ev.value[self.timestep] - 0.2) * ev.capacity_max
-                    discharge = to_discharge / ev.schedule_discharge[self.timestep]
+                    to_discharge = abs(ev.value[self.timestep] - ev.min_charge)
 
             # Check if the there is a trip and if EV meets the energy requirement for the departure
             if self.evs[idx].schedule_requirement_soc[self.timestep] > 0.0:
 
                 next_departure_soc = ev.schedule_requirement_soc[self.timestep]
 
-                if (ev.value[self.timestep] - 0.2) < (next_departure_soc / ev.capacity_max):
+                if (ev.value[self.timestep] - ev.min_charge) < next_departure_soc:
                     # Attribute penalty
                     penalty += self.ev_penalty
 
                     # Discharge the EV with the possible energy
-                    ev.value[self.timestep] = 0.2
-                    self.evs[idx].value[self.timestep] = 0.2
+                    ev.value[self.timestep] = ev.min_charge
+                    self.evs[idx].value[self.timestep] = ev.min_charge
 
                 else:
-                    new_ev_val = ev.value[self.timestep] - (next_departure_soc / ev.capacity_max)
+                    new_ev_val = ev.value[self.timestep] - next_departure_soc
                     ev.value[self.timestep] = new_ev_val
                     self.evs[idx].value[self.timestep] = new_ev_val
 
         # Update the EV costs
         cost = to_charge * ev.cost_charge[self.timestep] + to_discharge * ev.cost_discharge[self.timestep]
 
-        # Reward is energy delta
-        #  energy_before = self.available_energy
         self.available_energy = self.available_energy - to_charge + to_discharge
-        # import_cost = self.aggregator.import_cost[self.timestep] * max(-self.available_energy, 0.0)
-        # export_cost = self.aggregator.export_cost[self.timestep] * max(self.available_energy, 0.0)
-        #  cost = (abs(energy_before) - abs(self.available_energy)) * (import_cost + export_cost)
-        #  cost = -abs(self.available_energy) * (import_cost + export_cost)
-        #  cost = - ev_cost - abs(self.available_energy) * (import_cost + export_cost)
 
         new_ev_value = update_soc(ev.value[self.timestep],
-                                  charge,
-                                  discharge,
-                                  ev.capacity_max,
+                                  to_charge,
+                                  to_discharge,
                                   ev.charge_efficiency,
                                   ev.discharge_efficiency)
 
@@ -784,10 +730,10 @@ class EnergyCommunityEntropyPriorityV1(MultiAgentEnv):
         self.evs[idx].discharge[self.timestep] = to_discharge
 
         # Check if the EV is under 0.2 SoC and penalize if so
-        if ev.value[self.timestep] < 0.2:
+        if ev.value[self.timestep] < ev.min_charge:
             penalty += self.ev_penalty
 
-        return -cost, -penalty
+        return cost, penalty
 
     # Get the aggregator observations
     def __get_aggregator_observations__(self) -> dict:
@@ -847,8 +793,9 @@ class EnergyCommunityEntropyPriorityV1(MultiAgentEnv):
 
                 energy_to_import = self.aggregator.import_max[self.timestep]
 
-        cost = (energy_to_import * self.aggregator.import_cost[self.timestep]
-                - energy_to_export * self.aggregator.export_cost[self.timestep])
+        #cost = (energy_to_import * self.aggregator.import_cost[self.timestep] -
+        #        energy_to_export * self.aggregator.export_cost[self.timestep])
+        cost = energy_to_import * self.aggregator.import_cost[self.timestep]
 
         # Update resource values
         self.aggregator.imports[self.timestep] = energy_to_import
@@ -860,7 +807,7 @@ class EnergyCommunityEntropyPriorityV1(MultiAgentEnv):
         # Track the energy balance as the aggregator value
         self.aggregator.value[self.timestep] = self.available_energy
 
-        return -cost, -penalty
+        return cost, penalty
 
     # Reset the environment
     def reset(self, *, seed=None, options=None):
@@ -900,32 +847,48 @@ class EnergyCommunityEntropyPriorityV1(MultiAgentEnv):
                     current_res = self.storages[self.storage_index[agent_name]]
                     cost, penalty = self.__execute_storage_actions__(current_res, actions)
 
-                    reward[agent_name] = cost + penalty
-                    #self.global_rewards.append(cost)
-                    #self.global_rewards.append(penalty)
+                    reward[agent_name] = - cost - penalty
+
+                    #self.global_actions[agent_name] = [agent_action, cost, penalty]
 
                 elif agent_name.startswith('ev'):
                     current_res = self.evs[self.ev_index[agent_name]]
                     cost, penalty = self.__execute_ev_actions__(current_res, actions)
 
-                    reward[agent_name] = cost + penalty
+                    reward[agent_name] = - cost - penalty
                     #self.global_rewards.append(cost)
                     #self.global_rewards.append(penalty)
 
                 elif agent_name.startswith('aggregator'):
                     # Add the current energy balance to the history for debug
+                    #energy_before = deepcopy(self.available_energy)
+                    #cost_before = self.aggregator.import_cost[self.timestep] * max(-energy_before, 0.0)
+                    #              # - self.aggregator.export_cost[self.timestep] * max(energy_before, 0.0))
                     self.energy_history.append(self.available_energy)
                     cost, penalty = self.__execute_aggregator__()
 
-                    #reward[agent_name] = cost + penalty
+                    '''
+                    counterfactual_sum = 0.0
+                    action_sum = 0.0
+                    counterfactual_rewards = {}
+                    for current_agent in self.storages:
+                        counterfactual = energy_before - self.global_actions[current_agent.name][0]
+                        counterfactual_sum += counterfactual
+                        action_sum += self.global_actions[current_agent.name][0]
+                        counterfactual_cost = self.aggregator.import_cost[self.timestep] * max(-counterfactual, 0.0)# -
+                                               #self.aggregator.export_cost[self.timestep] * max(counterfactual, 0.0))
+                        counterfactual_reward = (counterfactual_cost - cost_before -
+                                                 0.01 * self.import_cost_mean *
+                                                 abs(counterfactual))
+                        counterfactual_rewards[current_agent.name] = counterfactual_reward
+                                                                     # - self.global_actions[current_agent.name][1])
 
-                    #self.global_rewards.append(cost)
-                    #self.global_rewards.append(penalty)
-
-                    current_reward = cost + penalty #sum(self.global_rewards) / len(self.agents)
-                    for agent in self.agents:
-                        reward[agent] = current_reward
-                    self.global_rewards = []
+                    for current_agent in self.storages:
+                        reward[current_agent.name] = (counterfactual_rewards[current_agent.name] -
+                                                      0.01 * self.import_cost_mean * abs(counterfactual_sum))# +
+                                                      #0.05 * self.import_cost_mean * abs(action_sum))
+                    '''
+                    reward[agent_name] = - cost - penalty
 
                 # Update the agent execution
                 self.executed_agents[self._current_agent_idx] = True
@@ -968,9 +931,9 @@ class EnergyCommunityEntropyPriorityV1(MultiAgentEnv):
                             #    reward[current_agent] = individual_reward
                             #self.global_rewards = []
                             if self.is_training:
-                                self.timestep = 0
-                                self.available_energy = self.gen_production[self.timestep] - self.load_consumption[
-                                    self.timestep]
+                                #self.timestep = 0
+                                #self.available_energy = self.gen_production[self.timestep] - self.load_consumption[
+                                #    self.timestep]
                                 end_episode = True
 
                         observations = self._get_observations() if not end_episode else {}
