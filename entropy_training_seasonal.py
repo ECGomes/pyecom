@@ -10,7 +10,13 @@ from src.parsers import HMParser, CotevParser
 from src.resources import Generator, Load, Storage, Aggregator, Vehicle
 from src.algorithms.rl import EnergyCommunityEntropyPriorityV1
 
+import torch
+from ray.tune import register_env
+from ray import tune, train
+from ray.air import CheckpointConfig
+from ray.tune.schedulers import AsyncHyperBandScheduler
 from ray.rllib.algorithms.ppo import PPOConfig
+
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -71,7 +77,6 @@ summer_start = aux_date_range.get_loc(aux_date_range[aux_date_range.month == 6].
 summer_end = aux_date_range.get_loc(aux_date_range[aux_date_range.month == 8].max())
 autumn_start = aux_date_range.get_loc(aux_date_range[aux_date_range.month == 9].min())
 autumn_end = aux_date_range.get_loc(aux_date_range[aux_date_range.month == 11].max())
-
 
 if SEASON == 'winter':
     N_STEPS = winter_end - winter_start - 1344
@@ -196,14 +201,13 @@ temp_env = EnergyCommunityEntropyPriorityV1(ren_generators=generators,
                                             ev_penalty=1,
                                             balance_penalty=1,
                                             look_ahead=12,
-                                            max_episode_length=N_STEPS-1,
+                                            max_episode_length=N_STEPS - 1,
                                             seed=42)
 temp_env.reset()
 terminations = truncations = {a: False for a in temp_env.agents}
 terminations['__all__'] = False
 truncations['__all__'] = False
 while not terminations['__all__'] and not truncations['__all__']:
-
     actions = temp_env.action_space.sample()
     next_obs, rewards, terminations, truncations, infos = temp_env.step(actions)
 
@@ -233,14 +237,11 @@ policies['aggregator'] = (None,
 
 # Create an RLlib Algorithm instance from a PPOConfig to learn how to
 # act in the above environment.
-from ray.tune import register_env
-from ray import tune, train
-from ray.air import CheckpointConfig
-from ray.tune.schedulers import AsyncHyperBandScheduler
-from ray.rllib.algorithms.ppo import PPOConfig
+
+num_gpus = int(torch.cuda.is_available())
 
 ray.shutdown()
-ray.init()
+ray.init(num_gpus=num_gpus)
 
 IMPORT_PENALTY = 1  # 100
 EXPORT_PENALTY = 1  # 10
@@ -269,7 +270,7 @@ env = EnergyCommunityEntropyPriorityV1(ren_generators=generators,
                                        ev_penalty=EV_REQUIREMENT_PENALTY,
                                        balance_penalty=BALANCE_PENALTY,
                                        look_ahead=12,
-                                       max_episode_length=N_STEPS-1,
+                                       max_episode_length=N_STEPS - 1,
                                        seed=42,
                                        is_training=True)
 register_env("EC_Entropy_V1", lambda config: env)
@@ -284,6 +285,7 @@ _config = (PPOConfig()
                      gamma=0.99)
            .exploration(exploration_config={})
            .framework('torch')
+           .resources(num_cpus_per_worker=num_gpus)
            .multi_agent(policies=policies,
                         policy_mapping_fn=(lambda agent_id, episode, worker, **kwargs: agent_id))
            .rollouts(batch_mode='truncate_episodes',
