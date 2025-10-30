@@ -947,26 +947,12 @@ class EnergyCommunityContributionPriorityV6(MultiAgentEnv):
 
         contributions = {}
         for res in self.evs:
-            contributions[res.name] = {
-                'discharge_cost': res.cost_discharge[self.timestep],
-                'charge_cost': res.cost_charge[self.timestep],
-                'soc': res.value[self.timestep],
-                'connected': res.schedule_connected[self.timestep],
-                'max_discharge_power': res.schedule_discharge[self.timestep],
-                'max_charge_power': res.schedule_charge[self.timestep],
-                'grid_balance': self.available_energy
-            }
+            contributions[res.name] = {'generation': list(res.discharge[:self.timestep]),
+                                       'consumption': list(res.charge[:self.timestep])}
 
         for res in self.storages:
-            contributions[res.name] = {
-                'discharge_cost': res.cost_discharge[self.timestep],
-                'charge_cost': res.cost_charge[self.timestep],
-                'soc': res.value[self.timestep],
-                'connected': 1.0,
-                'max_discharge_power': res.discharge_max[self.timestep],
-                'max_charge_power': res.charge_max[self.timestep],
-                'grid_balance': self.available_energy
-            }
+            contributions[res.name] = {'generation': list(res.discharge[:self.timestep]),
+                                       'consumption': list(res.charge[:self.timestep])}
 
         return contributions
 
