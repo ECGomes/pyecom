@@ -238,10 +238,8 @@ policies['aggregator'] = (None,
 # Create an RLlib Algorithm instance from a PPOConfig to learn how to
 # act in the above environment.
 
-num_gpus = int(torch.cuda.is_available())
-
 ray.shutdown()
-ray.init(num_gpus=num_gpus)
+ray.init()
 
 IMPORT_PENALTY = 1  # 100
 EXPORT_PENALTY = 1  # 10
@@ -285,7 +283,6 @@ _config = (PPOConfig()
                      gamma=0.99)
            .exploration(exploration_config={})
            .framework('torch')
-           .resources(num_cpus_per_worker=num_gpus)
            .multi_agent(policies=policies,
                         policy_mapping_fn=(lambda agent_id, episode, worker, **kwargs: agent_id))
            .rollouts(batch_mode='truncate_episodes',

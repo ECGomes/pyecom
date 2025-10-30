@@ -143,7 +143,8 @@ class EnergyCommunityContributionPriorityV6(MultiAgentEnv):
             self.aggregator: Aggregator = self.resources['aggregator']
 
             # Define the execution order
-            self.priority_system = ContributionPriority(self.storages + self.evs)
+            self.priority_system = ContributionPriority(self.storages + self.evs,
+                                                        log_scaling=False)
             self.priority_system.initialize_priority()
 
             # Set the global rewards to an empty list
@@ -344,7 +345,7 @@ class EnergyCommunityContributionPriorityV6(MultiAgentEnv):
 
         storage_actions = {}
         for storage in self.storages:
-            #storage_actions[storage.name] = gym.spaces.Discrete(self.battery_actions.shape[0])
+            # storage_actions[storage.name] = gym.spaces.Discrete(self.battery_actions.shape[0])
             storage_actions[storage.name] = gym.spaces.Box(low=-storage.discharge_max[0],
                                                            high=storage.charge_max[0],
                                                            dtype=np.float32,
@@ -380,7 +381,7 @@ class EnergyCommunityContributionPriorityV6(MultiAgentEnv):
             storage.value[self.timestep] = storage.value[self.timestep - 1]
             self.storages[idx].value[self.timestep] = storage.value[self.timestep - 1]
 
-        #storage_action = self.battery_actions[actions]
+        # storage_action = self.battery_actions[actions]
         storage_action = np.round(actions[0], 2)
 
         # Idle state
@@ -398,7 +399,7 @@ class EnergyCommunityContributionPriorityV6(MultiAgentEnv):
         # Charge state
         elif storage_action > 0.0:
             # Check if we can charge
-            to_charge: float = storage_action #* storage.charge_max[self.timestep]
+            to_charge: float = storage_action  # * storage.charge_max[self.timestep]
 
             # Check if we can charge
             if storage.value[self.timestep] >= storage.capacity_max:
@@ -416,7 +417,7 @@ class EnergyCommunityContributionPriorityV6(MultiAgentEnv):
         # Discharge state
         elif storage_action < 0.0:
 
-            to_discharge: float = abs(storage_action) #* storage.discharge_max[self.timestep]
+            to_discharge: float = abs(storage_action)  # * storage.discharge_max[self.timestep]
 
             # Check if we can discharge
             if storage.value[self.timestep] <= storage.capacity_min:
@@ -449,7 +450,7 @@ class EnergyCommunityContributionPriorityV6(MultiAgentEnv):
         # cost = cost_after - cost_before + 0.01 * self.import_cost_mean * to_discharge
         cost = cost_after - cost_before + cost_action
 
-    # Update resource charge and discharge values
+        # Update resource charge and discharge values
         storage.charge[self.timestep] = to_charge  # * storage.charge_efficiency
         storage.discharge[self.timestep] = to_discharge  # / storage.discharge_efficiency
 
@@ -522,7 +523,7 @@ class EnergyCommunityContributionPriorityV6(MultiAgentEnv):
         ev_actions = {}
         for ev in self.evs:
             ev_actions[ev.name] = gym.spaces.Discrete(self.ev_actions.shape[0])
-            #ev_actions[ev.name] = gym.spaces.Box(low=-ev.schedule_discharge[0],
+            # ev_actions[ev.name] = gym.spaces.Box(low=-ev.schedule_discharge[0],
             #                                     high=ev.schedule_charge[0],
             #                                     shape=(1,),
             #                                     dtype=np.float32)
@@ -790,8 +791,6 @@ class EnergyCommunityContributionPriorityV6(MultiAgentEnv):
 
                 energy_to_import = self.aggregator.import_max[self.timestep]
 
-        #cost = (energy_to_import * self.aggregator.import_cost[self.timestep] -
-        #        energy_to_export * self.aggregator.export_cost[self.timestep])
         cost = energy_to_import * self.aggregator.import_cost[self.timestep]
 
         # Update resource values
@@ -886,12 +885,13 @@ class EnergyCommunityContributionPriorityV6(MultiAgentEnv):
                         contributions = self.create_contribution_dict()
                         self.priority_system.update_resources(contributions, self.timestep)
                         priorities_for_timestep = self.priority_system.priorities.iloc[self.timestep]
-                        self.execution_order = np.append(priorities_for_timestep.sort_values(ascending=False).index.values,
-                                                         'aggregator')
+                        self.execution_order = np.append(
+                            priorities_for_timestep.sort_values(ascending=False).index.values,
+                            'aggregator')
 
                         end_episode = False
-                        # if self.timestep % 96 == 95 and self.is_training:
-                        #     end_episode = True
+                        if self.timestep % 96 == 95 and self.is_training:
+                            end_episode = True
 
                         observations = self._get_observations() if not end_episode else {}
                         info = self._log_info() if not end_episode else {}
@@ -952,8 +952,6 @@ class EnergyCommunityContributionPriorityV6(MultiAgentEnv):
         for res in self.evs:
             contributions[res.name] = {'generation': np.sum(res.discharge[:self.timestep]),
                                        'consumption': np.sum(res.charge[:self.timestep])}
-
-
 
         return contributions
 
