@@ -95,6 +95,6 @@ class ContributionPriority(Priority):
 
         df = df.transpose()
         df = df[self.priorities.columns]
-        self.priorities.loc[timestep, :] = df['priorities'].values
+        self.priorities.loc[timestep, :] = df.loc['priorities', :].values
 
         return
