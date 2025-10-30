@@ -83,7 +83,7 @@ class ContributionPriority(Priority):
 
         # Sum all the generation and consumption values
         total_generation = df['generation'].sum() + 1
-        total_consumption = df['production'].sum() + 1
+        total_consumption = df['consumption'].sum() + 1
 
         if self.log_scaling:
             df['priorities'] = (self.alpha * np.log((df['generation'] + 1.0) / total_generation) +
