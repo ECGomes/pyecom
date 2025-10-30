@@ -281,8 +281,13 @@ _config = (PPOConfig()
            .training(train_batch_size=12288,
                      sgd_minibatch_size=2048,
                      num_sgd_iter=5,
-                     lr=1e-4,
-                     gamma=0.99)
+                     lr=5e-5,
+                     gamma=0.99,
+                     use_critic=True,
+                     use_gae=True,
+                     use_kl_loss=True,
+                     lambda_=0.97,
+                     entropy_coeff=0.02)
            .exploration(exploration_config={})
            .framework('torch')
            .resources(num_cpus_per_worker=num_gpus)
