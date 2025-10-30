@@ -28,12 +28,12 @@ def set_seed(seed=None):
 
 class EnergyCommunityContributionPriorityV6(MultiAgentEnv):
     """
-    Based on the entropy weighting priority, this environment is designed to
+    Based on the contribution priority, this environment is designed to
     simulate an energy community with multiple agents.
     Reward is given only when a day ends
     """
 
-    metadata = {'name': 'EnergyCommunityEntropyPriority-v1'}
+    metadata = {'name': 'EnergyCommunityContribPriority-v6'}
 
     @cached_property
     def ren_gen_actions(self):
@@ -946,13 +946,14 @@ class EnergyCommunityContributionPriorityV6(MultiAgentEnv):
         """
 
         contributions = {}
-        for res in self.evs:
-            contributions[res.name] = {'generation': list(res.discharge[:self.timestep]),
-                                       'consumption': list(res.charge[:self.timestep])}
-
         for res in self.storages:
-            contributions[res.name] = {'generation': list(res.discharge[:self.timestep]),
-                                       'consumption': list(res.charge[:self.timestep])}
+            contributions[res.name] = {'generation': np.sum(res.discharge[:self.timestep]),
+                                       'consumption': np.sum(res.charge[:self.timestep])}
+        for res in self.evs:
+            contributions[res.name] = {'generation': np.sum(res.discharge[:self.timestep]),
+                                       'consumption': np.sum(res.charge[:self.timestep])}
+
+
 
         return contributions
 

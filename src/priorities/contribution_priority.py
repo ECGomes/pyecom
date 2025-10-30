@@ -79,36 +79,22 @@ class ContributionPriority(Priority):
         }
         """
 
+        df = pd.DataFrame.from_dict(new_data, orient='index')
+
         # Sum all the generation and consumption values
-        total_generation = sum([sum(x['generation']) for x in new_data.values()]) + 1
-        total_consumption = sum([sum(x['consumption']) for x in new_data.values()]) + 1
+        total_generation = df['generation'].sum() + 1
+        total_consumption = df['production'].sum() + 1
 
-        # Update the priority of each resource
-        for resource in new_data.keys():
+        if self.log_scaling:
+            df['priorities'] = (self.alpha * np.log((df['generation'] + 1.0) / total_generation) +
+                                self.beta * np.log((df['consumption'] + 1.0) / total_consumption))
 
-            if self.log_scaling:
-                total_generation = np.log(total_generation + 1)
-                total_consumption = np.log(total_consumption + 1)
+        else:
+            df['priorities'] = (self.alpha * (df['generation'] + 1.0) / total_generation +
+                                self.beta * (df['consumption'] + 1.0) / total_consumption)
 
-                contribution = self.alpha * (np.log(sum(new_data[resource]['generation']) + 1) / total_generation) + \
-                               self.beta * (np.log(sum(new_data[resource]['consumption']) + 1) / total_consumption)
-
-                # Update the priority of the resource
-                self.priorities.loc[timestep, resource] = contribution
-
-            else:
-                if total_generation == 0 and total_consumption == 0:
-                    self.priorities.loc[timestep, resource] = 0
-                elif total_generation == 0:
-                    self.priorities.loc[timestep, resource] = sum(new_data[resource]['consumption']) / total_consumption
-                elif total_consumption == 0:
-                    self.priorities.loc[timestep, resource] = sum(new_data[resource]['generation']) / total_generation
-                else:
-                    # Calculate the contribution of the resource
-                    contribution = self.alpha * (sum(new_data[resource]['generation']) / total_generation) + \
-                                   self.beta * (sum(new_data[resource]['consumption']) / total_consumption)
-
-                    # Update the priority of the resource
-                    self.priorities.loc[timestep, resource] = contribution
+        df = df.transpose()
+        df = df[self.priorities.columns]
+        self.priorities.loc[timestep, :] = df['priorities'].values
 
         return
