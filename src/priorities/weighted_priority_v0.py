@@ -58,18 +58,18 @@ class WeightedPriorityV0(Priority):
         }
         """
 
-        # Update the resources
-        for resource in new_data.keys():
-            if self.log_scaling:
-                self.priorities.loc[timestep, resource] = \
-                    np.log(new_data[resource]['urgency'] + 1) * self.urgency_weight + \
-                    np.log(new_data[resource]['capacity'] + 1) * self.capacity_weight
+        df = pd.DataFrame.from_dict(new_data, orient='index')
 
-            else:
-                self.priorities.loc[timestep, resource] = \
-                    new_data[resource]['urgency'] * self.urgency_weight + \
-                    new_data[resource]['capacity'] * self.capacity_weight
+        # log(a) + log(b) = log(a*b)
+        if self.log_scaling:
+            df['priorities'] = np.log(df['urgency'] * self.urgency_weight *
+                                      df['capacity'] * self.capacity_weight + 0.0001)
+        else:
+            df['priorities'] = (df['urgency'] * self.urgency_weight +
+                                df['capacity'] * self.capacity_weight)
 
-            # print(f"Resource {resource} updated with urgency {new_data[resource]['urgency']} and capacity {new_data[resource]['capacity']} at timestep {timestep}.")
+        df = df.transpose()
+        df = df[self.priorities.columns]
+        self.priorities.loc[timestep, :] = df.loc['priorities', :].values
 
         return
