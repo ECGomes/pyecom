@@ -52,7 +52,7 @@ class WeightedPriorityV0(Priority):
         Dictionary structure:
         {
             'resource_name': {
-                'urgency': int,
+                'urgency': float,
                 'capacity': float
             }
         }
