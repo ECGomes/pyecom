@@ -21,7 +21,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-SEASON = 'summer'  # 'winter', 'spring', 'summer', 'autumn'
+SEASON = 'spring'  # 'winter', 'spring', 'summer', 'autumn'
 SEASON_START = 0
 SEASON_END = 0
 

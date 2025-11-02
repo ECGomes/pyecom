@@ -100,11 +100,6 @@ class EnergyCommunityFixedPriorityV0(MultiAgentEnv):
         # Initialize the environment
         self._reset()
 
-        # Define the execution order
-        self.priority_system = EmpiricalPriority(self.storages + self.evs)
-        self.execution_order = np.append(self.priority_system.calculate_priority_df()['name'], 'aggregator')
-
-
         # Create indexes for resources to make it easier to lookup
         self.ev_index = {ev.name: i for i, ev in enumerate(self.evs)}
         self.storage_index = {storage.name: i for i, storage in enumerate(self.storages)}
@@ -161,6 +156,11 @@ class EnergyCommunityFixedPriorityV0(MultiAgentEnv):
 
         # Available overall and renewable energy for current timestep
         self.available_energy: float = self.gen_production[self.timestep] - self.load_consumption[self.timestep]
+
+        # Define the execution order
+        self.priority_system = EmpiricalPriority(self.storages + self.evs)
+        self.execution_order = np.append(self.priority_system.calculate_priority_df()['name'], 'aggregator')
+
 
         self.executed_agents = [False for _ in range(len(self.execution_order))]
 
