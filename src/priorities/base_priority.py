@@ -1,6 +1,4 @@
 # Base class for calculating priority
-import numpy as np
-
 
 class Priority(object):
 
