@@ -159,8 +159,8 @@ class EnergyCommunityFixedPriorityV0(MultiAgentEnv):
 
         # Define the execution order
         self.priority_system = EmpiricalPriority(self.storages + self.evs)
-        self.priorities = self.priority_system.calculate_priority(ascending=True)
-        self.execution_order = np.append(self.priorities, 'aggregator')
+        self.priorities = self.priority_system.calculate_priority()
+        self.execution_order = np.append(self.priorities['name'], 'aggregator')
 
         self.executed_agents = [False for _ in range(len(self.execution_order))]
 
