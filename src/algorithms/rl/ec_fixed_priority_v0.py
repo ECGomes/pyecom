@@ -159,8 +159,8 @@ class EnergyCommunityFixedPriorityV0(MultiAgentEnv):
 
         # Define the execution order
         self.priority_system = EmpiricalPriority(self.storages + self.evs)
-        self.execution_order = np.append(self.priority_system.calculate_priority_df()['name'], 'aggregator')
-
+        self.priorities = self.priority_system.calculate_priority(ascending=True)
+        self.execution_order = np.append(self.priorities, 'aggregator')
 
         self.executed_agents = [False for _ in range(len(self.execution_order))]
 
@@ -300,7 +300,7 @@ class EnergyCommunityFixedPriorityV0(MultiAgentEnv):
         current_soc = storage.value[self.timestep - 1] if self.timestep > 0 else storage.initial_charge
         current_soc = np.clip(current_soc, 0.0, storage.capacity_max)
 
-        current_priority = self.priority_system.priorities.loc[self.timestep, storage.name]
+        current_priority = self.priorities.loc[self.priorities['name'] == storage.name]['priority'].values[0]
 
         storage_observations: dict = {
             'soc': np.array([current_soc],
@@ -572,7 +572,7 @@ class EnergyCommunityFixedPriorityV0(MultiAgentEnv):
         current_soc = ev.value[self.timestep - 1] if self.timestep > 0 else ev.initial_charge
         current_soc = np.clip(current_soc, 0.0, ev.capacity_max)
 
-        current_priority = self.priority_system.priorities.loc[self.timestep, ev.name]
+        current_priority = self.priorities.loc[self.priorities['name'] == ev.name]['priority'].values[0]
 
         ev_observations: dict = {
             'soc': np.array([current_soc],
