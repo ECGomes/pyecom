@@ -97,12 +97,13 @@ class EnergyCommunityFixedPriorityV0(MultiAgentEnv):
                                 len(self.original_resources['ren_generators'][0].value) - 1)
         self.time_of_day = 0
 
+        # Initialize the environment
+        self._reset()
+
         # Define the execution order
         self.priority_system = EmpiricalPriority(self.storages + self.evs)
         self.execution_order = np.append(self.priority_system.calculate_priority_df()['name'], 'aggregator')
 
-        # Initialize the environment
-        self._reset()
 
         # Create indexes for resources to make it easier to lookup
         self.ev_index = {ev.name: i for i, ev in enumerate(self.evs)}
