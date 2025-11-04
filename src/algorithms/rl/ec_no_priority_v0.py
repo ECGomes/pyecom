@@ -826,30 +826,30 @@ class EnergyCommunityBaselineV7(MultiAgentEnv):
                     cost, penalty = self.__execute_aggregator__()
                     reward[agent_name] = - cost - penalty
 
-                # Check for episode end
-                if self.timestep >= self.max_timestep:
-                    observations = self._get_observations()
-                    info = self._log_info()
-                    terminateds, truncateds = self._log_ending(True)
-                    return observations, reward, terminateds, truncateds, info
+            # Check for episode end
+            if self.timestep >= self.max_timestep:
+                observations = self._get_observations()
+                info = self._log_info()
+                terminateds, truncateds = self._log_ending(True)
+                return observations, reward, terminateds, truncateds, info
 
-                else:
-                    # Update the timestep
-                    self.timestep += 1
-                    self.time_of_day = self.timestep % 96
+            else:
+                # Update the timestep
+                self.timestep += 1
+                self.time_of_day = self.timestep % 96
 
-                    # Update the available energy
-                    self.available_energy = self.gen_production[self.timestep] - self.load_consumption[
-                        self.timestep]
+                # Update the available energy
+                self.available_energy = self.gen_production[self.timestep] - self.load_consumption[
+                    self.timestep]
 
-                    end_episode = False
-                    if self.timestep % 96 == 95 and self.is_training:
-                        end_episode = True
+                end_episode = False
+                if self.timestep % 96 == 95 and self.is_training:
+                    end_episode = True
 
-                    observations = self._get_observations() if not end_episode else {}
-                    info = self._log_info() if not end_episode else {}
-                    terminateds, truncateds = self._log_ending(end_episode)
-                    return observations, reward, terminateds, truncateds, info
+                observations = self._get_observations() if not end_episode else {}
+                info = self._log_info() if not end_episode else {}
+                terminateds, truncateds = self._log_ending(end_episode)
+                return observations, reward, terminateds, truncateds, info
 
         else:
             terminateds, truncateds = self._log_ending(True)
