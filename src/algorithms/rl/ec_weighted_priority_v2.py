@@ -968,7 +968,7 @@ class EnergyCommunityWeightedPriorityV2(MultiAgentEnv):
 
             contributions[res.name] = {'urgency': next_departure,
                                        'capacity': res_value}
-            max_capacity = max(max_capacity, res.value[self.timestep] * res.capacity_max)
+            max_capacity = max(max_capacity, res_value)
 
         for key in contributions.keys():
             # Normalize capacity and multiply by 2 to match the urgency possible range
