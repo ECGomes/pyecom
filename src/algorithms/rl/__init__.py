@@ -52,4 +52,6 @@ from .ec_entropy_priority_v1 import EnergyCommunityEntropyPriorityV1
 
 from .ec_fixed_priority_v0 import EnergyCommunityFixedPriorityV0
 
+from .ec_discounted_contribution_priority_v0 import EnergyCommunityDiscountedContributionPriorityV0
+
 from .utils import *
