@@ -3,3 +3,4 @@ from .type_priority import EmpiricalPriority
 from .contribution_priority import ContributionPriority, DiscountedContributionPriority
 from .weighted_priority_v0 import WeightedPriorityV0
 from .entropy_weighting_priority import EntropyWeightingPriorityV0
+from .random_priority_v0 import RandomPriorityV0

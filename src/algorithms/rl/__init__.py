@@ -56,4 +56,6 @@ from .ec_discounted_contribution_priority_v0 import EnergyCommunityDiscountedCon
 
 from .ec_windowed_contribution_priority_v0 import EnergyCommunityWindowedContributionPriorityV0
 
+from .ec_random_priority_v0 import EnergyCommunityRandomPriorityV0
+
 from .utils import *
